@@ -1,0 +1,69 @@
+# =============================================================================
+# JABS Snapshot Agent Global Configuration Example
+# =============================================================================
+# Copy this file to 'global.yaml' and customize for your environment.
+# This file contains system-wide settings that apply to all backup jobs unless
+# overridden in an individual job configuration (config/jobs/*.yaml).
+
+# --- Repository ---
+# ONE restic repository per machine is the recommended convention (see
+# README.md) — jobs on this machine share this repo and are distinguished by
+# restic tags, not separate repos. Replace <hostname> with this machine's name.
+repo_path: "/mnt/nas-unas/restic-repos/<hostname>"
+
+# --- Default retention (restic's native `forget` keep-* policy) ---
+# Applied via `restic forget --prune` after a backup when a job requests it
+# (job.yaml `prune_after_backup: true`) or when `backup.py --prune` is passed.
+# Scoped to the job's own tag(s) so one job's retention never prunes another
+# job's snapshots sharing this repo.
+retention:
+  keep_last: 0        # always keep at least this many snapshots, regardless of age
+  keep_hourly: 0
+  keep_daily: 7
+  keep_weekly: 4
+  keep_monthly: 6
+  keep_yearly: 0
+  keep_within: ""      # e.g. "30d" - keep everything within this duration
+  group_by: ""         # restic --group-by for forget, e.g. "host,paths" (blank = restic's default: host,paths,tags)
+  extra_forget_args: []  # raw passthrough for any other `restic forget` flag
+
+# --- Performance / tuning (all optional; restic's own defaults apply if unset) ---
+restic_options:
+  limit_upload: 0        # KiB/s, 0 = unlimited (--limit-upload)
+  limit_download: 0      # KiB/s, 0 = unlimited (--limit-download)
+  compression: ""         # "auto" | "max" | "off" (repo must be format v2)
+  pack_size: 0            # target pack file size in MiB (0 = restic default)
+  cache_dir: ""           # override restic's local metadata cache location
+  no_cache: false         # disable the local cache entirely
+  retry_lock: ""          # e.g. "5m" - wait for a repo lock instead of failing immediately
+  one_file_system: false  # don't cross filesystem/mount boundaries
+  exclude_caches: true    # skip directories tagged with a CACHEDIR.TAG file
+  exclude_if_present: []  # e.g. ["NOBACKUP"] or ["NOBACKUP:special file"] - skip dirs containing a marker file
+  exclude_larger_than: "" # e.g. "1G" - skip files above this size
+  host: ""                # override the hostname recorded on snapshots (blank = machine hostname)
+  read_concurrency: 0     # concurrent file reads during backup (0 = restic default)
+  extra_backup_args: []   # raw passthrough for any other `restic backup` flag
+
+# --- Exclusions ---
+use_common_exclude: true   # true | false - use patterns from config/common_exclude.yaml
+
+# --- Integrity checks ---
+# A cheap `restic check` (metadata only, no data read back) runs automatically
+# after every backup unless disabled here or per-job. Set to false to skip it.
+# For a slow, full data read-back or a partial sample, run it manually instead:
+# ./jabs-agent.sh check-deep [--subset 5%]
+verify_after_backup: true
+
+# --- Email (immediate failure/completion alerts; the dashboard only sends a
+# periodic digest, so per-event alerting for this agent's own jobs lives here) ---
+email:
+  smtp_server: "smtp.zoho.com"
+  smtp_port: 587
+  to_addrs:
+    - "admin@example.com"
+  use_tls: true
+  notify_on:
+    error:
+      enabled: true
+    backup_complete:
+      enabled: false

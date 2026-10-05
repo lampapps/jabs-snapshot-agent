@@ -1,0 +1,53 @@
+# Example job config — copy this file to config/jobs/<job_name>.yaml and edit.
+
+job_name: "example"
+
+# One or more paths to back up into a single snapshot.
+paths:
+  - "/path/to/back/up"
+
+# Tags identify this job's snapshots within the machine's shared repo, and
+# scope `restic forget --prune`/`restic find` to just this job.
+tags:
+  - "example"
+
+schedules:
+  - cron: "0 3 * * *"    # 3:00 AM daily
+    enabled: false
+
+# Run `restic forget --prune` (scoped to this job's tags) after each backup.
+prune_after_backup: true
+
+# Uncomment to override the global verify_after_backup setting for this job.
+# verify_after_backup: true
+
+# Uncomment to override the global retention policy for this job.
+#retention:
+  #keep_last: 0
+  #keep_hourly: 0
+  #keep_daily: 7
+  #keep_weekly: 4
+  #keep_monthly: 6
+  #keep_yearly: 0
+  #keep_within: "30d"
+  #group_by: "host,paths"
+  #extra_forget_args: []
+
+# Uncomment to override any global restic_options for this job only (see
+# global.yaml for the full list and descriptions).
+#restic_options:
+  #limit_upload: 0
+  #limit_download: 0
+  #compression: "auto"
+  #one_file_system: false
+  #exclude_caches: true
+  #exclude_if_present: []
+  #exclude_larger_than: "1G"
+  #host: ""
+  #read_concurrency: 0
+  #extra_backup_args: []
+
+# Uncomment to add job-specific excludes on top of the common list.
+#exclude:
+  #- "Downloads/"
+  #- "Videos/"

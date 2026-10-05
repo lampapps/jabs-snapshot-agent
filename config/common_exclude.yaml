@@ -1,0 +1,13 @@
+# =============================================================================
+# Common exclude patterns, shared across all jobs when use_common_exclude: true
+# =============================================================================
+# restic --exclude patterns (gitignore-style globs, relative or absolute).
+# See: https://restic.readthedocs.io/en/stable/040_backup.html#excluding-files
+
+- "*.tmp"
+- "*.cache"
+- "__pycache__/"
+- "node_modules/"
+- ".cache/"
+- ".Trash-*/"
+- "lost+found/"
