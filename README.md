@@ -1,179 +1,146 @@
 # JABS Snapshot Agent
 
-A JABS (Just Another Backup Script) agent that runs [restic](https://restic.net/)
-backups on a cron schedule, reports progress/results to the JABS dashboard,
-and sends immediate email alerts on failure/completion. Restores are handled
-by [Restic Browser](https://github.com/emuell/restic-browser), a third-party
-GUI, installable via `./jabs-agent.sh install-browser`.
+A JABS (Just Another Backup Script) agent that runs [restic](https://restic.net/) backups on a schedule, emails failures, and can report to a JABS dashboard.
+
+- **Command line and config files only.** There is no GUI on the agent; everything you watch lives on the dashboard.
+- **Runs standalone.** Without a dashboard it backs up, prunes, checks and emails exactly the same. The dashboard is optional.
+- **Scheduled by a systemd timer**, not cron. A timer runs `python -m app tick` every 5 minutes; the tick decides which jobs are due.
 
 ## Design
 
-- **One restic repository per machine.** Each machine running this agent
-  backs up into its own restic repo (typically on local disk or a mounted
-  NAS share). Multiple jobs on the same machine can share one repo — restic
-  snapshots are tagged per job so retention (`forget --prune`) and restores
-  can be scoped to a single job's tag without touching another job's history.
-- **No local database.** restic's own snapshot index is the source of truth;
-  the agent only keeps a `portalocker`-based lock file per job to prevent
-  overlapping runs, plus rotated log files.
-- **Local/NAS backend only for v1.** S3-backed repos are not yet supported
-  (restic supports it natively; this can be added later without changing the
-  agent's architecture).
-- **restic binary must be pre-installed** and on `PATH` (or point `RESTIC_BIN`
-  at it in `.env`) — this agent never downloads or manages the restic binary
-  itself.
-- **Live progress reporting.** While a backup runs, restic's own `--json`
-  `status` lines (`percent_done`, `bytes_done`, `seconds_remaining`) are
-  parsed and posted to the dashboard every ~5s so the Agent Detail page can
-  show a live progress bar; the local log only records every 10% crossed.
-
-## Installing restic
-
-Install restic using whichever method suits your machine — the agent doesn't
-care how it got there, only that the binary is reachable. See the
-[official installation docs](https://restic.readthedocs.io/en/stable/020_installation.html)
-for the full list (package manager, static binary download, `restic
-self-update`, etc.).
-
-- **Installed via a package manager, or otherwise already on `PATH`**
-  (e.g. `apt install restic`, `dnf install restic`, Homebrew, a symlink into
-  `/usr/local/bin`): no configuration needed. Leave `RESTIC_BIN` unset/empty
-  in `.env` — the agent will call plain `restic` and find it on `PATH`.
-  Verify with:
-  ```bash
-  command -v restic && restic version
-  ```
-- **Installed somewhere NOT on `PATH`** (e.g. a static binary extracted to a
-  private directory): set `RESTIC_BIN` in `.env` to the full path, e.g.:
-  ```bash
-  RESTIC_BIN="/opt/restic/restic"
-  ```
-  `./jabs-agent.sh setup` and `./jabs-agent.sh help` both read this override
-  (via `.env`) when checking for/reporting the restic binary, and
-  `backup.py`/`scheduler.py` use it for every restic call via
-  `restic_client.py`.
+- **One restic repository per machine.** Jobs on the machine share it and are told apart by restic tags, so retention (`forget --prune`) and restores can be scoped to one job.
+- **No database.** Restic's snapshot index is the source of truth. The agent keeps a lock file per job and a small `data/state.json` (which schedule slots were served, each job's last result, when storage was last reported).
+- **restic must be installed** and on `PATH` (or set `RESTIC_BIN` in `.env`). The agent never downloads it.
+- **Local or remote repositories.** Anything restic accepts as `repo_path` works; free-space reporting only applies to local paths.
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.11 or newer with `python3-venv`
 - [restic](https://restic.readthedocs.io/en/stable/020_installation.html)
-  installed and on `PATH`
+- systemd, for the timer (without it, run `python -m app tick` from anything that can run a command every few minutes)
 
 ## Setup
 
 ```bash
-./jabs-agent.sh setup
+./setup.sh            # venv, dependencies, config/config.yaml, .env, an example job
 ```
 
-This creates a venv, installs Python requirements, and copies
-`config/global-example.yaml` → `config/global.yaml`, `.env.example` → `.env`,
-and a starter job from `config/templates/job.yaml` into `config/jobs/`.
+`./setup.sh` never overwrites existing files. If it finds the old `config/global.yaml` it copies it to `config/config.yaml` once.
 
 Then:
 
-1. Edit `.env` — set `RESTIC_PASSWORD` (or `RESTIC_PASSWORD_FILE`),
-   `JABS_AGENT_KEY`, `JABS_DASHBOARD_URL`, and SMTP credentials if you want
-   email alerts.
-2. Edit `config/global.yaml` — set `repo_path` and the default retention
-   policy.
-3. Edit/add job files under `config/jobs/` (see `config/templates/job.yaml`).
-4. Initialize the repo and run a first backup:
+1. Edit `.env`: `RESTIC_PASSWORD` or `RESTIC_PASSWORD_FILE`, and optionally SMTP login and the dashboard URL and key.
+2. Edit `config/config.yaml`: `repo_path`, retention, email.
+3. Add jobs in `config/jobs/*.yaml` (copy `config/templates/job.yaml`) and enable a schedule.
+4. Create the repository and try a job:
+
    ```bash
-   venv/bin/python backup.py --job example --init
-   ```
-5. Add a cron entry to run the scheduler periodically:
-   ```
-   */15 * * * * /path/to/snapshot_agent/venv/bin/python /path/to/snapshot_agent/scheduler.py > /dev/null 2>&1
+   .venv/bin/python -m app init-repo
+   .venv/bin/python -m app run JOB --dry-run
    ```
 
-Run `./jabs-agent.sh help` for ready-to-paste commands built from this
-machine's actual paths.
+5. Install the timer:
 
-## Usage
+   ```bash
+   sudo deploy/install.sh
+   ```
+
+Check everything with `.venv/bin/python -m app config`.
+
+### What `deploy/install.sh` does
+
+It installs a oneshot service and a timer (`jabs-snapshot-agent.service` and `.timer`), runs the config check as the service user, and starts the timer. The service is hardened (`ProtectSystem=strict`, `NoNewPrivileges`, private `/tmp`) and may write only to `data/`, a local repository directory and the restic cache, which it reads from your config with `python -m app paths`. **Run the script again after changing `repo_path` or a cache directory.**
+
+| Option | Meaning |
+| --- | --- |
+| `--user NAME` | Run as this user (default: the user who ran `sudo`). `root` is allowed, with a warning. |
+| `--read-all` | Let a non-root user read files it does not own (`CAP_DAC_READ_SEARCH`), to back up system directories or other users' homes. |
+| `--name UNIT` | Unit name (default `jabs-snapshot-agent`). |
+| `--no-start` | Install and enable the timer without starting it. |
+| `--render-only DIR` | Write the unit files into DIR and change nothing on the system. |
 
 ```bash
-# Run one job by name (config/jobs/<name>.yaml)
-venv/bin/python backup.py --job example
-
-# Initialize the repo if it doesn't exist yet
-venv/bin/python backup.py --job example --init
-
-# Run forget/prune after the backup
-venv/bin/python backup.py --job example --prune
-
-# Dry run (passed through to restic; still reports to the dashboard)
-venv/bin/python backup.py --job example --dry-run
-
-# Check all jobs' schedules and run any that are due (invoked by cron)
-venv/bin/python scheduler.py
+systemctl status jabs-snapshot-agent.timer
+journalctl -u jabs-snapshot-agent -f          # logs
+sudo systemctl start jabs-snapshot-agent      # run a tick now
 ```
 
-## Restoring
+Logs go to the journal; the agent writes no log files. If you used the old cron-based scheduler, the script warns when a `scheduler.py` line is still in a crontab. Remove it, or jobs will run twice.
 
-Restores are done with [Restic Browser](https://github.com/emuell/restic-browser),
-a third-party GUI that browses snapshots and restores files/folders while
-preserving their original timestamps (unlike some other restore paths). It is
-not bundled with this agent and is never invoked by cron.
+## Scheduling
 
-Install or update it with:
+Each job lists schedules as 5-field cron expressions (`schedules: [{cron: "0 3 * * *", enabled: true}]`). They are evaluated by the agent, and no cron daemon is involved.
+
+- The agent remembers, per job and expression, the latest scheduled time it has served. A newer slot is due.
+- **A missed run happens once at the next tick**, for example after the machine was off or while another backup was still running. Several missed slots still mean one run.
+- A job seen for the first time only gets a baseline, so installing never starts a surprise backup.
+- A failed backup is not retried until its next slot.
+- Several schedules of one job that are due together run it once.
+- Jobs run one after another within a tick, and a job already running (a manual `run`) is skipped.
+
+The tick every 5 minutes means a job starts up to 5 minutes after its scheduled time. For tighter timing change `OnCalendar` in `deploy/agent.timer` (for example `minutely`) and run `deploy/install.sh` again.
+
+## Commands
+
+Run as `.venv/bin/python -m app <command>`.
+
+| Command | Purpose |
+| --- | --- |
+| `config` | Validate `config.yaml` and the job files; shows whether the dashboard is in use |
+| `tick` | Run what is due, report to the dashboard (the timer does this) |
+| `run JOB [--init] [--prune] [--dry-run]` | Run one job now; `--dry-run` still reports to the dashboard |
+| `init-repo` | Create the repository if it does not exist |
+| `check [--deep] [--subset 5%]` | Verify the repository; metadata only unless `--deep` or `--subset` (slow, reads data) |
+| `snapshots [--job NAME]` | List snapshots |
+| `ls SNAPSHOT [PATH]` | List the files in a snapshot |
+| `restore SNAPSHOT TARGET [--path P]` | Restore a snapshot, or one path of it, into TARGET |
+| `find [QUERY]` | Search all snapshots for a file by partial, case-insensitive name |
+| `jobs` | Each job's next scheduled run and last result |
+| `testmail` | Send a test email with the SMTP settings |
+| `report-storage [--print]` | Measure and report storage now |
+| `reset --yes` | Delete lock files and the schedule state (never the repository or your config) |
+| `paths` | Print the directories the agent must be able to write |
+
+A cheap `restic check` (metadata only) runs after every backup unless `verify_after_backup: false`. A failing check is reported and emailed but does not fail the backup.
+
+## Dashboard (optional)
+
+Set `JABS_DASHBOARD_URL` and `JABS_AGENT_KEY` in `.env` (register the agent on the dashboard host with `python -m app agent add NAME`). Leave them empty, or set `dashboard.enabled: false` in `config.yaml`, to run standalone; `python -m app config` says which mode is active.
+
+What the dashboard receives:
+
+- **Events** for every run (start, stages, progress about every 5 seconds, completion, check result, snapshots removed by pruning) and a heartbeat with each job's schedule on every tick. Every request carries the machine's **hostname** (`hostname:` in `config.yaml`, else the system name) so jobs on different machines with the same name stay apart.
+- **Logs**, shipped as two logs: `tick` and `backup` (job name in each line). A background thread sends batches; if the dashboard is down they are kept in a bounded buffer and retried, and a down dashboard never slows a backup.
+- **Storage** (`storage:` in `config.yaml`): free and used space of the volume holding a local repository (every 15 minutes), the repository's size (every 12 hours; `restic stats` can be slow on big repositories), and the size of each job's latest snapshot after each backup (`source_size: false` turns it off).
+
+Dashboard problems are logged and never change a backup's result.
+
+## Restoring and finding files
 
 ```bash
-./jabs-agent.sh install-browser
-```
-
-This downloads the latest Linux AppImage release into `restic-browser/` and
-makes it executable. Launch it with:
-
-```bash
-restic-browser/Restic-Browser.AppImage
-```
-
-(AppImages need `libfuse2` on some distros, e.g. `apt install libfuse2`.) Point
-it at your `repo_path` from `config/global.yaml` and the `RESTIC_PASSWORD`/
-`RESTIC_PASSWORD_FILE` from `.env`.
-
-### Finding a file
-
-Restic Browser doesn't offer a "search all snapshots by partial name" view, so
-`scripts/find_file.py` fills that gap:
-
-```bash
-venv/bin/python scripts/find_file.py "partial-name"
-```
-
-Matches by partial, case-insensitive filename/path fragment (auto-wrapped in
-`*...*` wildcards) across every snapshot in the repo, and prints a
-deduplicated list of matching paths — paginated 30 at a time if the list is
-longer. Read-only; it never restores anything itself (use Restic Browser for
-that once you know the path).
-
-## Integrity checks
-
-A cheap `restic check` (metadata only — no data is read back) runs
-automatically after every backup to catch repository-structure problems
-early. It never fails the backup itself; a failure is logged and emailed
-separately (`email.notify_on.error`). Disable it with `verify_after_backup:
-false` in `global.yaml` or a job config if you'd rather run checks purely on
-your own schedule.
-
-For a real data-integrity check (reads the actual backed-up data, not just
-repository structure), run one manually — this is slow and I/O-heavy, so it's
-never run automatically:
-
-```bash
-./jabs-agent.sh check          # quick check, same as the automatic post-backup one
-./jabs-agent.sh check-deep     # slow: reads every byte in the repo
-./jabs-agent.sh check-deep --subset 5%   # slow: reads only a 5% sample
+.venv/bin/python -m app snapshots --job docs
+.venv/bin/python -m app ls SNAPSHOT_ID /home/jim/docs
+.venv/bin/python -m app restore SNAPSHOT_ID /tmp/restore --path /home/jim/docs/report.txt
+.venv/bin/python -m app find report
 ```
 
 ## Configuration
 
-See `config/global-example.yaml` and `config/templates/job.yaml` for the full,
-commented set of options. Job-level `retention`/`exclude` override the global
-config when present.
+`config/config.yaml` (from `config/config.example.yaml`) holds the settings shared by all jobs; `config/jobs/*.yaml` can override retention, restic options, `repo_path` and `verify_after_backup` per job. Every key is documented in the example files. Secrets live only in `.env`: `RESTIC_PASSWORD` or `RESTIC_PASSWORD_FILE`, `JABS_SMTP_USER` and `JABS_SMTP_PASS`, `JABS_DASHBOARD_URL`, `JABS_AGENT_KEY`, `UPTIME_KUMA_URL`, `RESTIC_BIN`, `ENV_MODE`.
 
-## Launcher
+Blank values in YAML (`retention:`) mean "use the default".
 
-`jabs-agent.sh` handles `setup`, `logs`, `reset`, `install-browser`, `check`,
-`check-deep`, and `help`. `reset` only clears local logs/locks — it never
-touches your restic repository or config.
+An optional Uptime Kuma push monitor gets an `up` or `down` ping after each run (not on dry runs).
+
+## Development
+
+```bash
+./setup.sh --dev
+.venv/bin/python -m pytest -q
+```
+
+The tests that use a real restic repository are skipped when restic is not installed. See [AGENTS.md](AGENTS.md) for the layout and conventions.
+
+## License
+
+MIT, see [LICENSE.md](LICENSE.md).

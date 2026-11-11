@@ -34,7 +34,7 @@ prune_after_backup: true
   #extra_forget_args: []
 
 # Uncomment to override any global restic_options for this job only (see
-# global.yaml for the full list and descriptions).
+# config.yaml for the full list and descriptions).
 #restic_options:
   #limit_upload: 0
   #limit_download: 0

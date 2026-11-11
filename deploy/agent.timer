@@ -1,0 +1,11 @@
+[Unit]
+Description=Run JABS snapshot agent (@NAME@) every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnCalendar=*:0/5
+Persistent=true
+Unit=@NAME@.service
+
+[Install]
+WantedBy=timers.target

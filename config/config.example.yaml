@@ -1,9 +1,20 @@
 # =============================================================================
-# JABS Snapshot Agent Global Configuration Example
+# JABS Snapshot Agent Configuration Example
 # =============================================================================
-# Copy this file to 'global.yaml' and customize for your environment.
-# This file contains system-wide settings that apply to all backup jobs unless
-# overridden in an individual job configuration (config/jobs/*.yaml).
+# Copy this file to 'config.yaml' (./setup.sh does it for you) and customize it.
+# These are the system-wide settings; an individual job (config/jobs/*.yaml)
+# can override most of them. Secrets (restic password, SMTP login, dashboard
+# key) go in .env, never here.
+
+# --- Dashboard (optional) ---
+# The agent runs fine on its own. Set JABS_DASHBOARD_URL and JABS_AGENT_KEY in
+# .env to report to a JABS dashboard (events, logs, storage). Set enabled to
+# false to force standalone mode even when those are set.
+dashboard:
+  enabled: true
+
+# Name reported to the dashboard for this machine. Blank = the system hostname.
+hostname: ""
 
 # --- Repository ---
 # ONE restic repository per machine is the recommended convention (see
@@ -13,7 +24,7 @@ repo_path: "/mnt/nas-unas/restic-repos/<hostname>"
 
 # --- Default retention (restic's native `forget` keep-* policy) ---
 # Applied via `restic forget --prune` after a backup when a job requests it
-# (job.yaml `prune_after_backup: true`) or when `backup.py --prune` is passed.
+# (job.yaml `prune_after_backup: true`) or when `python -m app run JOB --prune` is passed.
 # Scoped to the job's own tag(s) so one job's retention never prunes another
 # job's snapshots sharing this repo.
 retention:
@@ -51,19 +62,26 @@ use_common_exclude: true   # true | false - use patterns from config/common_excl
 # A cheap `restic check` (metadata only, no data read back) runs automatically
 # after every backup unless disabled here or per-job. Set to false to skip it.
 # For a slow, full data read-back or a partial sample, run it manually instead:
-# ./jabs-agent.sh check-deep [--subset 5%]
+# .venv/bin/python -m app check --deep [--subset 5%]
 verify_after_backup: true
 
 # --- Email (immediate failure/completion alerts; the dashboard only sends a
 # periodic digest, so per-event alerting for this agent's own jobs lives here) ---
 email:
-  smtp_server: "smtp.zoho.com"
+  smtp_server: ""
   smtp_port: 587
-  to_addrs:
-    - "admin@example.com"
+  to_addrs: []
   use_tls: true
   notify_on:
     error:
       enabled: true
     backup_complete:
       enabled: false
+  from_addr: ""          # blank = the SMTP login name (JABS_SMTP_USER in .env)
+
+# --- Storage reporting to the dashboard (ignored when standalone) ---
+storage:
+  report: true                   # send storage samples
+  volume_interval_minutes: 15    # free/used space of the volume holding a local repo
+  repo_size_interval_hours: 12   # size of the restic repository (restic stats; can be slow on big repos)
+  source_size: true              # size of each job's latest snapshot, measured after each backup
