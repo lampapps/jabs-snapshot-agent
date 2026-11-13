@@ -114,6 +114,25 @@ What the dashboard receives:
 
 Dashboard problems are logged and never change a backup's result.
 
+## Logs
+
+The agent logs to stderr, which systemd captures in the journal. It writes no log files and sends none to the dashboard, so read them on the machine the agent runs on. The dashboard's job page shows each run's events (click a run's date), but not log lines.
+
+```bash
+journalctl -u jabs-snapshot-agent -f                  # follow live
+journalctl -u jabs-snapshot-agent -n 200 --no-pager   # last 200 lines
+journalctl -u jabs-snapshot-agent --since today       # today only
+journalctl -u jabs-snapshot-agent -p warning          # warnings and errors only
+journalctl -u jabs-snapshot-agent -o cat > agent.log  # plain text for sharing
+```
+
+- Use the unit name you gave `--name` if it is not `jabs-snapshot-agent`.
+- The timer starts a short-lived service every 5 minutes, so each run is a separate batch of lines. `systemctl list-timers jabs-snapshot-agent.timer` shows when the next one starts.
+- A non-root user may need to be in the `systemd-journal` group (or use `sudo`) to read the journal.
+- Run by hand (`.venv/bin/python -m app tick` or `run JOB`), the lines print to your terminal instead.
+- Set `ENV_MODE=development` in `.env` for DEBUG level (the default is INFO). It is read at the start of every run, so no restart is needed.
+- The journal's size and retention are set by systemd (`journald.conf`), not by the agent. Passwords and the repository secret are never logged.
+
 ## Restoring and finding files
 
 ```bash
