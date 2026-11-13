@@ -25,7 +25,7 @@ A JABS (Just Another Backup Script) agent that runs [restic](https://restic.net/
 ./setup.sh            # venv, dependencies, config/config.yaml, .env, an example job
 ```
 
-`./setup.sh` never overwrites existing files. If it finds the old `config/global.yaml` it copies it to `config/config.yaml` once.
+`./setup.sh` never overwrites existing files. If it finds the old `config/global.yaml` it copies it to `config/config.yaml` once. If `python3` is older than 3.11, choose another interpreter: `PYTHON=python3.11 ./setup.sh` (needs `python3.11-venv`). Run it as the user that will own the install, not with `sudo`.
 
 Then:
 

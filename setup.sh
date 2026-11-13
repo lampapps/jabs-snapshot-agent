@@ -2,6 +2,7 @@
 # First-time setup: venv, dependencies, config files from the examples.
 # Safe to re-run; never overwrites existing files.
 # Usage: ./setup.sh [--dev]     (--dev also installs the test dependencies)
+#        PYTHON=python3.11 ./setup.sh   (use another interpreter than python3)
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -10,14 +11,16 @@ DEV=0
 
 die() { echo "error: $*" >&2; exit 1; }
 
-python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
-    || die "Python 3.11 or newer is required"
-python3 -c 'import ensurepip, venv' 2>/dev/null \
-    || die "python3-venv is missing (sudo apt install python3-venv)"
+PYTHON=${PYTHON:-python3}
+command -v "$PYTHON" >/dev/null 2>&1 || die "$PYTHON was not found"
+"$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
+    || die "Python 3.11 or newer is required (found $("$PYTHON" --version 2>&1); set PYTHON=python3.11 to choose another)"
+"$PYTHON" -c 'import ensurepip, venv' 2>/dev/null \
+    || die "the venv module is missing for $PYTHON (sudo apt install ${PYTHON}-venv)"
 command -v restic >/dev/null 2>&1 || [[ -n ${RESTIC_BIN:-} ]] \
     || echo "warning: restic was not found on PATH; install it or set RESTIC_BIN in .env" >&2
 
-[[ -d .venv ]] || python3 -m venv .venv
+[[ -d .venv ]] || "$PYTHON" -m venv .venv
 .venv/bin/pip install --quiet -r requirements.txt
 if ((DEV)); then
     .venv/bin/pip install --quiet -r requirements-dev.txt
