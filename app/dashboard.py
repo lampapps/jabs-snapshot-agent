@@ -158,18 +158,7 @@ class Client:
             "message": message or f"restic forget --prune removed {len(external_ids)} snapshot(s)",
         }, ok=(200,))
 
-    # ------------------------------------------------------------ logs and storage
-
-    def post_logs(self, log: str, lines: list, batch_id: str) -> str:
-        """Send log lines; returns 'ok', 'retry' (try the same batch again later) or 'drop' (the dashboard refused it)."""
-        response = self._post("/api/v2/logs", {"hostname": self.hostname, "log": log, "batch_id": batch_id,
-                                               "lines": lines})
-        if response is None or response.status_code >= 500:
-            return "retry"
-        if response.status_code in (200, 201):
-            return "ok"
-        logger.debug("dashboard refused log batch: %s %s", response.status_code, response.text[:200])
-        return "drop"
+    # ------------------------------------------------------------ storage
 
     def post_storage(self, samples: list) -> bool:
         if not samples:

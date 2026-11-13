@@ -110,7 +110,6 @@ Set `JABS_DASHBOARD_URL` and `JABS_AGENT_KEY` in `.env` (register the agent on t
 What the dashboard receives:
 
 - **Events** for every run (start, stages, progress about every 5 seconds, completion, check result, snapshots removed by pruning) and a heartbeat with each job's schedule on every tick. Every request carries the machine's **hostname** (`hostname:` in `config.yaml`, else the system name) so jobs on different machines with the same name stay apart.
-- **Logs**, shipped as two logs: `tick` and `backup` (job name in each line). A background thread sends batches; if the dashboard is down they are kept in a bounded buffer and retried, and a down dashboard never slows a backup.
 - **Storage** (`storage:` in `config.yaml`): free and used space of the volume holding a local repository (every 15 minutes), the repository's size (every 12 hours; `restic stats` can be slow on big repositories), and the size of each job's latest snapshot after each backup (`source_size: false` turns it off).
 
 Dashboard problems are logged and never change a backup's result.

@@ -68,20 +68,8 @@ class TestTick:
         write_job(home, "a", JOB.format(name="a", cron="0 3 * * *"))
         with caplog.at_level("INFO"):
             assert main("tick") == 0
-        assert "standalone mode" in caplog.text and "tick complete" in caplog.text
+        assert "tick complete" in caplog.text
         assert state.read()["jobs"]["a"]["served"]  # baseline recorded
-
-    def test_with_a_dashboard_logs_are_shipped_and_closed_cleanly(self, home, monkeypatch):
-        write_config(home)
-        monkeypatch.setenv("JABS_DASHBOARD_URL", "http://dash")
-        monkeypatch.setenv("JABS_AGENT_KEY", "k")
-        sent = []
-        monkeypatch.setattr(cli.Client, "post_logs", lambda self, stream, lines, batch_id: sent.append((stream, lines)) or "ok")
-        monkeypatch.setattr(cli.Client, "_post", lambda self, path, payload: None)
-        monkeypatch.setattr(cli.storage, "collect_scheduled", lambda *a, **k: [])
-        assert main("tick") == 0
-        assert any(stream == "tick" and any("tick complete" in l["message"] for l in lines) for stream, lines in sent)
-        assert not any(isinstance(h, cli.LogShipper) for h in logging.getLogger("app").handlers)
 
 
 class TestRun:

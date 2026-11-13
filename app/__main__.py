@@ -11,12 +11,9 @@ from typing import Optional
 from . import config, mailer, restic, runner, schedule, search, settings, state, storage, tick
 from .config import Config, ConfigError
 from .dashboard import Client
-from .logship import LogShipper
 from .restic import ResticError
 
 LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
-# Commands whose log lines are also sent to the dashboard's log viewer.
-SHIPPED = ("tick", "run")
 
 
 def _credentials() -> tuple:
@@ -257,23 +254,13 @@ def main(argv: Optional[list] = None) -> int:
     level = logging.DEBUG if settings.env_mode() == "development" else logging.INFO
     logging.basicConfig(level=level, format=LOG_FORMAT, stream=sys.stderr)
     logging.getLogger().setLevel(level)
-    shipper: Optional[LogShipper] = None
     try:
         cfg = config.load_config()
         client = Client.from_env(cfg)
-        if args.command in SHIPPED and client.enabled:
-            shipper = LogShipper(client)
-            logging.getLogger("app").addHandler(shipper)
-        elif args.command in SHIPPED:
-            logging.getLogger(__name__).info("standalone mode: no dashboard configured")
         return args.func(args, cfg, client)
     except (ConfigError, ResticError) as exc:
         print(exc, file=sys.stderr)
         return 1
-    finally:
-        if shipper is not None:
-            logging.getLogger("app").removeHandler(shipper)
-            shipper.close()
 
 
 if __name__ == "__main__":

@@ -69,7 +69,6 @@ class TestMode:
         assert client.send_job_schedule("j", "0 3 * * *") is False
         assert client.send_target_purged("j", ["abc"]) is False
         assert client.post_storage([{"name": "n"}]) is False
-        assert client.post_logs("tick", [{"message": "x"}], "b1") == "retry"
 
 
 class TestEvents:
@@ -148,24 +147,7 @@ class TestFailures:
             assert live().send_event("heartbeat", "x") is False
 
 
-class TestLogsAndStorage:
-    @pytest.mark.parametrize("status,expected", [(201, "ok"), (200, "ok"), (500, "retry"), (503, "retry"),
-                                                 (400, "drop"), (401, "drop"), (403, "drop")])
-    def test_log_batch_outcomes(self, posts, status, expected):
-        posts.status = status
-        assert live().post_logs("tick", [{"message": "x"}], "b1") == expected
-
-    def test_a_connection_error_means_retry(self, monkeypatch):
-        monkeypatch.setattr(dashboard.requests, "post", Posts(error=requests.exceptions.Timeout()))
-        assert live().post_logs("tick", [{"message": "x"}], "b1") == "retry"
-
-    def test_log_payload(self, posts):
-        live("NAS1").post_logs("backup", [{"message": "hi", "level": "INFO", "ts": 1.5}], "batch-1")
-        call = posts.calls[0]
-        assert call.url.endswith("/api/v2/logs")
-        assert call.json == {"hostname": "NAS1", "log": "backup", "batch_id": "batch-1",
-                             "lines": [{"message": "hi", "level": "INFO", "ts": 1.5}]}
-
+class TestStorage:
     def test_storage_payload(self, posts):
         sample = {"name": "Restic repo", "kind": "repo", "used_bytes": 5}
         assert live("NAS1").post_storage([sample]) is True
