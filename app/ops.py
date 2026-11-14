@@ -1,6 +1,7 @@
 """Operations shared by the command line and the admin console, so both behave the same."""
 
 import json
+import logging
 import os
 import shutil
 from datetime import datetime
@@ -11,6 +12,8 @@ import portalocker
 
 from . import config, restic, runner, schedule, search, settings, state, storage
 from .config import Config, ConfigError
+
+logger = logging.getLogger(__name__)
 
 
 def credentials() -> tuple:
@@ -126,6 +129,24 @@ def jobs_overview(cfg: Config, now: Optional[datetime] = None) -> tuple:
              "last": data.get("jobs", {}).get(job.name, {}).get("last_run"), "running": job_lock_info(job.name)}
             for job in jobs]
     return rows, errors
+
+
+def delete_job(job: config.Job) -> None:
+    """Delete a job's file from config/jobs and forget its schedule state. Snapshots in the repository are kept.
+
+    Refuses to delete a file outside the jobs directory, or a job that is running.
+    """
+    path = Path(job.path).resolve()
+    if path.parent != settings.JOBS_DIR.resolve() or path.suffix not in (".yaml", ".yml"):
+        raise ConfigError(f"{job.path} is not a file in {settings.JOBS_DIR}; delete it by hand")
+    if job_lock_info(job.name) is not None:
+        raise ConfigError(f"'{job.name}' is running; wait for it to finish")
+    path.unlink()
+    try:
+        with state.transaction() as data:
+            data.get("jobs", {}).pop(job.name, None)
+    except (OSError, portalocker.exceptions.LockException) as exc:
+        logger.warning("deleted %s but could not clear its schedule state: %s", path.name, exc)
 
 
 def reset_state() -> int:

@@ -1017,3 +1017,115 @@ class TestRealRestic:
             assert len(self.snapshots(real, tmp_path)) == 1
 
         drive(scenario)
+
+
+class TestDeleteJob:
+    def test_needs_the_job_name_typed_then_removes_the_file_and_its_state(self, two_jobs):
+        state.record_run("alpha", {"success": True, "finished_at": 1})
+        state.record_run("beta", {"success": True, "finished_at": 1})
+
+        async def scenario(app, pilot):
+            await wait_for(pilot, lambda: len(table_rows(app, "jobs-table")) == 2)
+            pane_button(app, JobsPane, "delete").press()
+            await wait_dialog(pilot, app, "Delete job alpha")
+            assert app.screen.query_one("#ok", Button).disabled is True
+            app.screen.query_one("#word").value = "beta"
+            await pilot.pause(0.1)
+            assert app.screen.query_one("#ok", Button).disabled is True
+            app.screen.query_one("#word").value = "alpha"
+            await pilot.pause(0.1)
+            await press(pilot, app, "ok")
+            await wait_for(pilot, lambda: [r[0] for r in table_rows(app, "jobs-table")] == ["beta"])
+
+        drive(scenario)
+        assert not (settings.JOBS_DIR / "alpha.yaml").exists() and (settings.JOBS_DIR / "beta.yaml").exists()
+        assert list(state.read()["jobs"]) == ["beta"]
+
+    def test_the_selected_job_is_the_one_deleted(self, two_jobs):
+        async def scenario(app, pilot):
+            await wait_for(pilot, lambda: len(table_rows(app, "jobs-table")) == 2)
+            app.query_one("#jobs-table", DataTable).focus()
+            await pilot.press("down")
+            pane_button(app, JobsPane, "delete").press()
+            await wait_dialog(pilot, app, "Delete job beta")
+
+        drive(scenario)
+        assert (settings.JOBS_DIR / "beta.yaml").exists()
+
+    def test_cancelling_keeps_the_job(self, two_jobs):
+        async def scenario(app, pilot):
+            await wait_for(pilot, lambda: table_rows(app, "jobs-table"))
+            pane_button(app, JobsPane, "delete").press()
+            await wait_dialog(pilot, app, "Delete job alpha")
+            await press(pilot, app, "cancel")
+            await pilot.pause(0.2)
+            assert dialog_title(app) is None
+
+        drive(scenario)
+        assert (settings.JOBS_DIR / "alpha.yaml").exists()
+
+    def test_a_running_job_cannot_be_deleted(self, two_jobs):
+        lock = locking.acquire_lock(runner.lock_path("alpha"))
+
+        async def scenario(app, pilot):
+            await wait_for(pilot, lambda: table_rows(app, "jobs-table"))
+            pane_button(app, JobsPane, "delete").press()
+            await wait_dialog(pilot, app, "Error")
+            assert "is running" in dialog_text(app)
+
+        try:
+            drive(scenario)
+        finally:
+            locking.release_lock(lock)
+        assert (settings.JOBS_DIR / "alpha.yaml").exists()
+
+    def test_no_job_selected_explains(self, home):
+        write_config(home)
+
+        async def scenario(app, pilot):
+            await wait_for(pilot, lambda: "No jobs yet" in str(app.query_one("#jobs-note", Static).render()))
+            pane_button(app, JobsPane, "delete").press()
+            await wait_dialog(pilot, app, "No job selected")
+
+        drive(scenario)
+
+    def test_removing_a_jobs_own_local_repository_offers_to_reinstall_the_units(self, home, monkeypatch, tmp_path):
+        local = tmp_path / "own-repo"
+        local.mkdir()
+        write_config(home, "repo_path: /repo\n")
+        write_job(home, "alpha", JOB.format(name="alpha") + f"repo_path: {local}\n")
+        reinstalls = []
+
+        async def reinstall_units(self):
+            reinstalls.append(1)
+
+        monkeypatch.setattr(AdminApp, "reinstall_units", reinstall_units)
+
+        async def scenario(app, pilot):
+            await wait_for(pilot, lambda: table_rows(app, "jobs-table"))
+            pane_button(app, JobsPane, "delete").press()
+            await wait_dialog(pilot, app, "Delete job alpha")
+            app.screen.query_one("#word").value = "alpha"
+            await pilot.pause(0.1)
+            await press(pilot, app, "ok")
+            await wait_dialog(pilot, app, "The service's writable directories changed")
+            assert f"- {local}" in dialog_text(app)
+            await press(pilot, app, "ok")
+            await wait_for(pilot, lambda: reinstalls)
+
+        drive(scenario)
+
+    def test_a_job_whose_name_differs_from_its_file_deletes_the_right_file(self, home):
+        write_config(home)
+        write_job(home, "file-name", 'job_name: "display-name"\npaths: [/d]\n')
+
+        async def scenario(app, pilot):
+            await wait_for(pilot, lambda: table_rows(app, "jobs-table"))
+            pane_button(app, JobsPane, "delete").press()
+            await wait_dialog(pilot, app, "Delete job display-name")
+            app.screen.query_one("#word").value = "display-name"
+            await pilot.pause(0.1)
+            await press(pilot, app, "ok")
+            await wait_for(pilot, lambda: not (settings.JOBS_DIR / "file-name.yaml").exists())
+
+        drive(scenario)

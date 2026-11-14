@@ -18,6 +18,27 @@ def _writable_paths() -> Optional[list]:
         return None
 
 
+async def writable_paths_before() -> Optional[list]:
+    """Snapshot of the service's writable directories, to compare after a change."""
+    return await asyncio.to_thread(_writable_paths)
+
+
+async def offer_reinstall_if_paths_changed(app, paths_before: Optional[list]) -> None:
+    """After a change, offer to reinstall the units when the directories the sandboxed service may write changed."""
+    paths_after = await asyncio.to_thread(_writable_paths)
+    if paths_before is None or paths_after is None or paths_before == paths_after:
+        return
+    added = sorted(set(paths_after) - set(paths_before))
+    removed = sorted(set(paths_before) - set(paths_after))
+    lines = [f"+ {p}" for p in added] + [f"- {p}" for p in removed]
+    ok, _ = await app.confirm(
+        "The service's writable directories changed",
+        "The systemd service is sandboxed and may only write to the directories it was installed with:\n\n"
+        + "\n".join(lines) + "\n\nReinstall the units now so backups can write there?", confirm="Reinstall now")
+    if ok:
+        await app.reinstall_units()
+
+
 async def edit_entry(app, entry: dict) -> bool:
     """Open `entry` in the editor and check it afterwards (edit again, revert or keep when invalid).
 
@@ -62,17 +83,7 @@ async def edit_entry(app, entry: dict) -> bool:
         return False
     audit("file edited", file=entry["label"])
     app.notify(f"{entry['label']} saved; it applies at the next run")
-    paths_after = await asyncio.to_thread(_writable_paths)
-    if paths_before is not None and paths_after is not None and paths_before != paths_after:
-        added = sorted(set(paths_after) - set(paths_before))
-        removed = sorted(set(paths_before) - set(paths_after))
-        lines = [f"+ {p}" for p in added] + [f"- {p}" for p in removed]
-        ok, _ = await app.confirm(
-            "The service's writable directories changed",
-            "The systemd service is sandboxed and may only write to the directories it was installed with:\n\n"
-            + "\n".join(lines) + "\n\nReinstall the units now so backups can write there?", confirm="Reinstall now")
-        if ok:
-            await app.reinstall_units()
+    await offer_reinstall_if_paths_changed(app, paths_before)
     return True
 
 

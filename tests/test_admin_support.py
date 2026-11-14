@@ -374,6 +374,39 @@ class TestOps:
         write_config(home, "repo_path: sftp:host:/repo\n")
         assert not any(p.startswith("sftp:") for p in ops.writable_paths(config.load_config()))
 
+    def test_delete_job_removes_the_file_and_only_that_jobs_state(self, home):
+        from app import state
+
+        write_config(home)
+        path = write_job(home, "a")
+        write_job(home, "b")
+        state.record_run("a", {"success": True, "finished_at": 1})
+        state.record_run("b", {"success": True, "finished_at": 1})
+        ops.delete_job(config.find_job("a", config.load_config()))
+        assert not path.exists() and list(state.read()["jobs"]) == ["b"]
+
+    def test_delete_job_refuses_files_outside_the_jobs_directory(self, home, tmp_path):
+        write_config(home)
+        outside = tmp_path / "elsewhere.yaml"
+        outside.write_text("paths: [/d]\n")
+        job = config.load_job(outside, config.load_config())
+        with pytest.raises(config.ConfigError, match="delete it by hand"):
+            ops.delete_job(job)
+        assert outside.exists()
+
+    def test_delete_job_refuses_a_running_job(self, home):
+        from app import locking, runner
+
+        write_config(home)
+        path = write_job(home, "a")
+        lock = locking.acquire_lock(runner.lock_path("a"))
+        try:
+            with pytest.raises(config.ConfigError, match="is running"):
+                ops.delete_job(config.find_job("a", config.load_config()))
+        finally:
+            locking.release_lock(lock)
+        assert path.exists()
+
     def test_snapshot_fields(self):
         snap = {"short_id": "abcd1234", "time": "2027-01-15T03:00:00.1Z", "hostname": "h", "tags": ["t"], "paths": ["/a", "/b"]}
         assert ops.snapshot_fields(snap) == ("abcd1234", "2027-01-15 03:00:00", "h", "t", "/a /b")

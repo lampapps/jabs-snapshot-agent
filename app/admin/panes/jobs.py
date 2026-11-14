@@ -1,6 +1,7 @@
 """Jobs tab: what is scheduled, and running a configured job now, live or as a dry run."""
 
 import asyncio
+from pathlib import Path
 from typing import Optional
 
 from textual import on
@@ -25,10 +26,11 @@ DRY_NOTE = ("restic --dry-run: nothing is saved, so no snapshot is created. The 
 class JobsPane(Pane):
     TAB_ID = "jobs"
     TAB_TITLE = "1 Jobs"
-    ACTIONS = {"jobs.list": "reload", "jobs.run": "do_run", "jobs.edit": "do_edit", "jobs.new": "do_new"}
+    ACTIONS = {"jobs.list": "reload", "jobs.run": "do_run", "jobs.edit": "do_edit", "jobs.new": "do_new",
+               "jobs.delete": "do_delete"}
     BINDINGS = [
         Binding("d", "dry_run", "Dry run"), Binding("b", "backup", "Back up now"), Binding("e", "edit", "Edit"),
-        Binding("n", "new", "New job"),
+        Binding("n", "new", "New job"), Binding("x", "delete", "Delete job"),
     ]
 
     def __init__(self) -> None:
@@ -43,6 +45,7 @@ class JobsPane(Pane):
             yield Button("Back up now", id="backup", variant="success")
             yield Button("Edit job file", id="edit")
             yield Button("New job", id="new")
+            yield Button("Delete job", id="delete", variant="error")
 
     def on_mount(self) -> None:
         self.query_one(DataTable).add_columns("Job", "Schedule", "Next run", "Last run", "Now")
@@ -152,6 +155,32 @@ class JobsPane(Pane):
 
     # ---------------------------------------------------------------- bindings and buttons
 
+    async def do_delete(self) -> None:
+        name = self.selected()
+        job = self._jobs.get(name) if name else None
+        if job is None:
+            await self.admin.show("No job selected", "Select a job in the table first.")
+            return
+        if await asyncio.to_thread(ops.job_lock_info, job.name) is not None:
+            await self.admin.error(f"'{job.name}' is running; wait for it to finish before deleting it.")
+            return
+        ok, _ = await self.admin.confirm(
+            f"Delete job {job.name}",
+            f"Deletes {job.path} and forgets the job's schedule state. This cannot be undone from here.\n\n"
+            "Snapshots already in the repository are kept (find and restore them in the Repository tab), and the "
+            "dashboard keeps the job's run history. Backups of this job stop.",
+            confirm="Delete job", danger=True, type_word=job.name)
+        if not ok:
+            return
+        paths_before = await editing.writable_paths_before()
+        await asyncio.to_thread(ops.delete_job, job)
+        audit("job deleted", job=job.name, file=Path(job.path).name)
+        await self.reload()
+        self.notify(f"Deleted {Path(job.path).name}")
+        await editing.offer_reinstall_if_paths_changed(self.admin, paths_before)
+
+    # ---------------------------------------------------------------- bindings and buttons
+
     def action_dry_run(self) -> None:
         self.admin.spawn(self.do_run, True)
 
@@ -163,6 +192,9 @@ class JobsPane(Pane):
 
     def action_new(self) -> None:
         self.admin.spawn(self.do_new)
+
+    def action_delete(self) -> None:
+        self.admin.spawn(self.do_delete)
 
     @on(Button.Pressed)
     def _button(self, event: Button.Pressed) -> None:
