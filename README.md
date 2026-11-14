@@ -6,20 +6,13 @@ A JABS (Just Another Backup Script) agent that runs [restic](https://restic.net/
 - **Runs standalone.** Without a dashboard it backs up, prunes, checks and emails exactly the same. The dashboard is optional.
 - **Scheduled by a systemd timer**, not cron. A timer runs `python -m app tick` every 5 minutes; the tick decides which jobs are due.
 
-## Design
-
-- **One restic repository per machine.** Jobs on the machine share it and are told apart by restic tags, so retention (`forget --prune`) and restores can be scoped to one job.
-- **No database.** Restic's snapshot index is the source of truth. The agent keeps a lock file per job and a small `data/state.json` (which schedule slots were served, each job's last result, when storage was last reported).
-- **restic must be installed** and on `PATH` (or set `RESTIC_BIN` in `.env`). The agent never downloads it.
-- **Local or remote repositories.** Anything restic accepts as `repo_path` works; free-space reporting only applies to local paths.
-
 ## Requirements
 
 - Python 3.11 or newer with `python3-venv`
 - [restic](https://restic.readthedocs.io/en/stable/020_installation.html)
 - systemd, for the timer (without it, run `python -m app tick` from anything that can run a command every few minutes)
 
-## Setup
+## Install
 
 ```bash
 ./setup.sh            # venv, dependencies, config/config.yaml, .env, an example job
@@ -67,7 +60,17 @@ sudo systemctl start jabs-snapshot-agent      # run a tick now
 
 Logs go to the journal; the agent writes no log files. If you used the old cron-based scheduler, the script warns when a `scheduler.py` line is still in a crontab. Remove it, or jobs will run twice.
 
-## Scheduling
+## Configuration
+
+`config/config.yaml` (from `config/config.example.yaml`) holds the settings shared by all jobs; `config/jobs/*.yaml` can override retention, restic options, `repo_path` and `verify_after_backup` per job. Every key is documented in the example files. Secrets live only in `.env`: `RESTIC_PASSWORD` or `RESTIC_PASSWORD_FILE`, `JABS_SMTP_USER` and `JABS_SMTP_PASS`, `JABS_DASHBOARD_URL`, `JABS_AGENT_KEY`, `UPTIME_KUMA_URL`, `RESTIC_BIN`, `ENV_MODE`.
+
+Blank values in YAML (`retention:`) mean "use the default".
+
+An optional Uptime Kuma push monitor gets an `up` or `down` ping after each run (not on dry runs).
+
+## Usage
+
+### Scheduling
 
 Each job lists schedules as 5-field cron expressions (`schedules: [{cron: "0 3 * * *", enabled: true}]`). They are evaluated by the agent, and no cron daemon is involved.
 
@@ -80,7 +83,7 @@ Each job lists schedules as 5-field cron expressions (`schedules: [{cron: "0 3 *
 
 The tick every 5 minutes means a job starts up to 5 minutes after its scheduled time. For tighter timing change `OnCalendar` in `deploy/agent.timer` (for example `minutely`) and run `deploy/install.sh` again.
 
-## Commands
+### Commands
 
 Run as `.venv/bin/python -m app <command>`.
 
@@ -104,7 +107,7 @@ Run as `.venv/bin/python -m app <command>`.
 
 A cheap `restic check` (metadata only) runs after every backup unless `verify_after_backup: false`. A failing check is reported and emailed but does not fail the backup.
 
-## Admin console
+### Admin console
 
 `.venv/bin/python -m app admin` opens a full-screen console for the person administering the agent: everything the commands above do, plus running jobs. Switch tabs with `1` to `6` or the mouse; the footer lists the keys for the current tab; `r` refreshes and `q` quits. It starts even when `config.yaml` is broken, so you can fix it there.
 
@@ -121,7 +124,23 @@ A run started from the console is the same `python -m app run JOB` the timer sta
 
 Run it as the user that owns the install; it refuses to start as root when the install belongs to someone else, because root-owned state files would stop the service from writing its own data. Units are found by their working directory; if that fails, pass `--unit jabs-snapshot-agent`. Administrative actions are recorded in the journal as `jabs-admin`; passwords are never logged. It needs the `textual` package, installed by `./setup.sh`.
 
-## Dashboard (optional)
+### Restoring and finding files
+
+```bash
+.venv/bin/python -m app snapshots --job docs
+.venv/bin/python -m app ls SNAPSHOT_ID /home/jim/docs
+.venv/bin/python -m app restore SNAPSHOT_ID /tmp/restore --path /home/jim/docs/report.txt
+.venv/bin/python -m app find report
+```
+
+## How it works
+
+- **One restic repository per machine.** Jobs on the machine share it and are told apart by restic tags, so retention (`forget --prune`) and restores can be scoped to one job.
+- **No database.** Restic's snapshot index is the source of truth. The agent keeps a lock file per job and a small `data/state.json` (which schedule slots were served, each job's last result, when storage was last reported).
+- **restic must be installed** and on `PATH` (or set `RESTIC_BIN` in `.env`). The agent never downloads it.
+- **Local or remote repositories.** Anything restic accepts as `repo_path` works; free-space reporting only applies to local paths.
+
+## Dashboard integration (optional)
 
 Set `JABS_DASHBOARD_URL` and `JABS_AGENT_KEY` in `.env` (register the agent on the dashboard host with `python -m app agent add NAME`). Leave them empty, or set `dashboard.enabled: false` in `config.yaml`, to run standalone; `python -m app config` says which mode is active.
 
@@ -132,7 +151,7 @@ What the dashboard receives:
 
 Dashboard problems are logged and never change a backup's result.
 
-## Logs
+## Logs and troubleshooting
 
 The agent logs to stderr, which systemd captures in the journal. It writes no log files and sends none to the dashboard, so read them on the machine the agent runs on. The dashboard's job page shows each run's events (click a run's date), but not log lines.
 
@@ -150,23 +169,6 @@ journalctl -u jabs-snapshot-agent -o cat > agent.log  # plain text for sharing
 - Run by hand (`.venv/bin/python -m app tick` or `run JOB`), the lines print to your terminal instead.
 - Set `ENV_MODE=development` in `.env` for DEBUG level (the default is INFO). It is read at the start of every run, so no restart is needed.
 - The journal's size and retention are set by systemd (`journald.conf`), not by the agent. Passwords and the repository secret are never logged.
-
-## Restoring and finding files
-
-```bash
-.venv/bin/python -m app snapshots --job docs
-.venv/bin/python -m app ls SNAPSHOT_ID /home/jim/docs
-.venv/bin/python -m app restore SNAPSHOT_ID /tmp/restore --path /home/jim/docs/report.txt
-.venv/bin/python -m app find report
-```
-
-## Configuration
-
-`config/config.yaml` (from `config/config.example.yaml`) holds the settings shared by all jobs; `config/jobs/*.yaml` can override retention, restic options, `repo_path` and `verify_after_backup` per job. Every key is documented in the example files. Secrets live only in `.env`: `RESTIC_PASSWORD` or `RESTIC_PASSWORD_FILE`, `JABS_SMTP_USER` and `JABS_SMTP_PASS`, `JABS_DASHBOARD_URL`, `JABS_AGENT_KEY`, `UPTIME_KUMA_URL`, `RESTIC_BIN`, `ENV_MODE`.
-
-Blank values in YAML (`retention:`) mean "use the default".
-
-An optional Uptime Kuma push monitor gets an `up` or `down` ping after each run (not on dry runs).
 
 ## Development
 
