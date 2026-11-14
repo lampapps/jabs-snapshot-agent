@@ -7,7 +7,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-VERSION = "0.2.2"
+VERSION = "0.3.0"
 AGENT_TYPE = "Snapshot"
 
 # JABS_HOME relocates everything the agent owns (used by tests and side-by-side installs).
