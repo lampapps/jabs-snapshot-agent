@@ -24,6 +24,7 @@ Runs restic backups on a systemd timer; optionally reports to a JABS dashboard. 
 - Narrow exceptions only; a broad `except Exception` needs `# pylint: disable=broad-except` and a reason. No `sys.exit()` outside `__main__`.
 - Logging goes to stderr (journald); do not add log files. Level is DEBUG when `ENV_MODE=development`. Use `logging.getLogger(__name__)`.
 - Secrets only via `.env`.
+- The agent's version is the `MAJOR.MINOR.PATCH` in the root `VERSION` file (read by `app/settings.py`); never write it anywhere else. Every JABS component follows this.
 
 ## Testing
 
