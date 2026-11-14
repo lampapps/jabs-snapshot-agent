@@ -45,7 +45,7 @@ Then:
    sudo deploy/install.sh
    ```
 
-Check everything with `.venv/bin/python -m app config`.
+Check everything with `.venv/bin/python -m app config`. The [admin console](#admin-console) (`.venv/bin/python -m app admin`) can do every step above, and run jobs, from one screen.
 
 ### What `deploy/install.sh` does
 
@@ -87,6 +87,7 @@ Run as `.venv/bin/python -m app <command>`.
 | Command | Purpose |
 | --- | --- |
 | `config` | Validate `config.yaml` and the job files; shows whether the dashboard is in use |
+| `admin [--unit NAME]` | Open the interactive [admin console](#admin-console) |
 | `tick` | Run what is due, report to the dashboard (the timer does this) |
 | `run JOB [--init] [--prune] [--dry-run]` | Run one job now; `--dry-run` still reports to the dashboard |
 | `init-repo` | Create the repository if it does not exist |
@@ -102,6 +103,23 @@ Run as `.venv/bin/python -m app <command>`.
 | `paths` | Print the directories the agent must be able to write |
 
 A cheap `restic check` (metadata only) runs after every backup unless `verify_after_backup: false`. A failing check is reported and emailed but does not fail the backup.
+
+## Admin console
+
+`.venv/bin/python -m app admin` opens a full-screen console for the person administering the agent: everything the commands above do, plus running jobs. Switch tabs with `1` to `6` or the mouse; the footer lists the keys for the current tab; `r` refreshes and `q` quits. It starts even when `config.yaml` is broken, so you can fix it there.
+
+| Tab | What you can do |
+| --- | --- |
+| 1 Jobs | Each job's schedule, next run, last result and whether it is running now. **Dry run** (`d`) or **Back up now** (`b`) runs the job in a window that streams restic's output, with a Stop button (interrupts so the run cleans up). Options: create the repository first, prune afterwards. Edit a job file (`e`) or create one from the template (`n`) |
+| 2 Repository | Snapshots (filter by job), list a snapshot's files, restore a snapshot or one path, find a file across all snapshots, check the repository (quick, sample or deep) and create it |
+| 3 Files | Check `config.yaml`, `.env`, `common_exclude.yaml` and every job file, and edit any of them in your system editor (`$VISUAL`, `$EDITOR`, else the system default such as nano). A file is validated when you leave the editor: edit again, revert or keep. The agent reads its files at the start of every run, so a valid edit applies at the next tick; if the directories the sandboxed service may write change, it offers to reinstall the units |
+| 4 Diagnostics | Run the tick now, send a test mail, measure storage, test the dashboard link (sends one heartbeat), show the schedule state, list the writable directories, reset the schedule state (typed confirmation) |
+| 5 Service | State of the service and timer; start (runs a tick now), stop, enable or disable the timer, reinstall the units with the options already in use (all through `sudo`), follow the journal |
+| 6 Docs | Read the install's Markdown files; links between documents work and `b` goes back |
+
+A run started from the console is the same `python -m app run JOB` the timer starts, so it takes the same job lock (a job that is already running is refused), reports to the dashboard and emails on failure. A dry run is still reported to the dashboard, marked `[DRY RUN]`. Closing the console stops a run it started.
+
+Run it as the user that owns the install; it refuses to start as root when the install belongs to someone else, because root-owned state files would stop the service from writing its own data. Units are found by their working directory; if that fails, pass `--unit jabs-snapshot-agent`. Administrative actions are recorded in the journal as `jabs-admin`; passwords are never logged. It needs the `textual` package, installed by `./setup.sh`.
 
 ## Dashboard (optional)
 

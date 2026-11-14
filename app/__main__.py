@@ -2,31 +2,15 @@
 
 import argparse
 import logging
-import shutil
 import sys
-from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
-from . import config, mailer, restic, runner, schedule, search, settings, state, storage, tick
+from . import config, mailer, ops, runner, search, settings, storage, tick
 from .config import Config, ConfigError
 from .dashboard import Client
 from .restic import ResticError
 
 LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
-
-
-def _credentials() -> tuple:
-    password, password_file = settings.restic_password()
-    if not password and not password_file:
-        raise ConfigError("neither RESTIC_PASSWORD nor RESTIC_PASSWORD_FILE is set (put one in .env)")
-    return password, password_file
-
-
-def _repo(cfg: Config) -> str:
-    if not cfg.repo_path:
-        raise ConfigError(f"no repo_path in {settings.CONFIG_PATH}")
-    return cfg.repo_path
 
 
 def _cmd_config(_args: argparse.Namespace, cfg: Config, client: Client) -> int:
@@ -55,26 +39,18 @@ def _cmd_run(args: argparse.Namespace, cfg: Config, client: Client) -> int:
 
 
 def _cmd_init_repo(_args: argparse.Namespace, cfg: Config, _client: Client) -> int:
-    repo, (password, password_file) = _repo(cfg), _credentials()
-    global_args = restic.global_args_from(cfg.restic_options)
-    if restic.repo_exists(repo, password, password_file, global_args=global_args):
+    repo = ops.repo_path(cfg)
+    if not ops.init_repository(cfg):
         print(f"Repository already exists: {repo}")
         return 0
-    print(f"Initializing new restic repository: {repo}")
-    restic.init_repo(repo, password, password_file, global_args=global_args)
-    print("Repository initialized.")
+    print(f"Initialized new restic repository: {repo}")
     return 0
 
 
 def _cmd_check(args: argparse.Namespace, cfg: Config, _client: Client) -> int:
-    repo, (password, password_file) = _repo(cfg), _credentials()
-    deep = args.deep or bool(args.subset)
-    label = (f"partial data check (subset={args.subset})" if args.subset
-             else "full data check" if deep else "quick check (metadata only)")
-    print(f"Running {label} against {repo} ...")
+    print(f"Running {ops.check_label(args.deep, args.subset)} against {ops.repo_path(cfg)} ...")
     try:
-        restic.check(repo, password, password_file, read_data=deep and not args.subset,
-                     read_data_subset=args.subset, global_args=restic.global_args_from(cfg.restic_options))
+        ops.check_repository(cfg, args.deep, args.subset)
     except ResticError as exc:
         print(f"Repository check FAILED: {exc}", file=sys.stderr)
         return 1
@@ -83,38 +59,29 @@ def _cmd_check(args: argparse.Namespace, cfg: Config, _client: Client) -> int:
 
 
 def _cmd_snapshots(args: argparse.Namespace, cfg: Config, _client: Client) -> int:
-    repo, (password, password_file) = _repo(cfg), _credentials()
-    tags = config.find_job(args.job, cfg).tags if args.job else None
-    snapshots = restic.list_snapshots(repo, tags=tags, password=password, password_file=password_file,
-                                      global_args=restic.global_args_from(cfg.restic_options))
+    snapshots = ops.snapshot_list(cfg, args.job)
     if not snapshots:
         print("no snapshots")
     for snap in snapshots:
-        stamp = (snap.get("time") or "")[:19].replace("T", " ")
-        print(f"{snap.get('short_id', snap.get('id', '')[:8])}  {stamp}  {snap.get('hostname', '')}  "
-              f"{','.join(snap.get('tags') or []) or '-'}  {' '.join(snap.get('paths') or [])}")
+        print("  ".join(ops.snapshot_fields(snap)))
     return 0
 
 
 def _cmd_ls(args: argparse.Namespace, cfg: Config, _client: Client) -> int:
-    repo, (password, password_file) = _repo(cfg), _credentials()
-    entries = restic.list_files(repo, args.snapshot, path=args.path, password=password, password_file=password_file,
-                                global_args=restic.global_args_from(cfg.restic_options))
-    search.page_output([entry["path"] for entry in entries if entry.get("path")])
+    search.page_output(ops.snapshot_files(cfg, args.snapshot, args.path))
     return 0
 
 
 def _cmd_restore(args: argparse.Namespace, cfg: Config, _client: Client) -> int:
-    repo, (password, password_file) = _repo(cfg), _credentials()
+    ops.repo_path(cfg), ops.credentials()
     print(f"Restoring {args.snapshot}{' ' + args.path if args.path else ''} to {args.target} ...")
-    restic.restore(repo, args.snapshot, args.target, include_path=args.path, password=password,
-                   password_file=password_file, global_args=restic.global_args_from(cfg.restic_options))
+    ops.restore_snapshot(cfg, args.snapshot, args.target, args.path)
     print("Restore finished.")
     return 0
 
 
 def _cmd_find(args: argparse.Namespace, cfg: Config, _client: Client) -> int:
-    repo, (password, password_file) = _repo(cfg), _credentials()
+    ops.repo_path(cfg), ops.credentials()
     query = args.query
     if not query:
         try:
@@ -125,8 +92,8 @@ def _cmd_find(args: argparse.Namespace, cfg: Config, _client: Client) -> int:
     if not query:
         print("No search term given.", file=sys.stderr)
         return 1
-    print(f"Searching repo: {repo}")
-    paths = search.find_paths(repo, query, password, password_file, restic.global_args_from(cfg.restic_options))
+    print(f"Searching repo: {cfg.repo_path}")
+    paths = ops.find_matches(cfg, query)
     if not paths:
         print(f"No matches found for '{query}'.")
         return 0
@@ -135,19 +102,11 @@ def _cmd_find(args: argparse.Namespace, cfg: Config, _client: Client) -> int:
     return 0
 
 
-def _fmt_ts(ts: Optional[float]) -> str:
-    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M") if ts else "-"
-
-
 def _cmd_jobs(_args: argparse.Namespace, cfg: Config, _client: Client) -> int:
-    jobs, errors = config.load_jobs(cfg)
-    data = state.read()
-    now = schedule.local_now()
-    for job in jobs:
-        nxt = schedule.next_run(job, now)
-        last = data.get("jobs", {}).get(job.name, {}).get("last_run")
-        outcome = "-" if not last else f"{'ok' if last.get('success') else 'FAILED'} {_fmt_ts(last.get('finished_at'))}"
-        print(f"{job.name}\tnext {nxt.strftime('%Y-%m-%d %H:%M') if nxt else '-'}\tlast {outcome}")
+    rows, errors = ops.jobs_overview(cfg)
+    for row in rows:
+        nxt = row["next"]
+        print(f"{row['job'].name}\tnext {nxt.strftime('%Y-%m-%d %H:%M') if nxt else '-'}\tlast {ops.format_last(row['last'])}")
     for message in errors:
         print(message, file=sys.stderr)
     return 1 if errors else 0
@@ -167,11 +126,7 @@ def _cmd_testmail(_args: argparse.Namespace, cfg: Config, _client: Client) -> in
 
 
 def _cmd_report_storage(args: argparse.Namespace, cfg: Config, client: Client) -> int:
-    jobs, _ = config.load_jobs(cfg)
-    repo_paths = sorted({job.repo_path for job in jobs} or ({cfg.repo_path} if cfg.repo_path else set()))
-    samples = storage.collect_scheduled(cfg, repo_paths, force=True)
-    if cfg.storage.source_size:
-        samples += [s for s in (storage.source_size_sample(cfg, job) for job in jobs) if s]
+    samples = ops.storage_samples(cfg)
     print(storage.describe(samples))
     if args.print or not client.enabled:
         return 0
@@ -179,17 +134,7 @@ def _cmd_report_storage(args: argparse.Namespace, cfg: Config, client: Client) -
 
 
 def _cmd_paths(_args: argparse.Namespace, cfg: Config, _client: Client) -> int:
-    """Directories the agent must be able to write; deploy/install.sh turns them into ReadWritePaths."""
-    jobs, _ = config.load_jobs(cfg)
-    wanted = {str(settings.DATA_DIR)}
-    for repo in {job.repo_path for job in jobs} | ({cfg.repo_path} if cfg.repo_path else set()):
-        if storage.is_local_repo(repo):
-            wanted.add(repo)
-    caches = {cfg.restic_options.cache_dir} | {job.restic_options.cache_dir for job in jobs}
-    wanted |= {path for path in caches if path}
-    if not any(job.restic_options.no_cache for job in jobs) and not cfg.restic_options.no_cache:
-        wanted.add(str(Path.home() / ".cache" / "restic"))
-    print("\n".join(sorted(wanted)))
+    print("\n".join(ops.writable_paths(cfg)))
     return 0
 
 
@@ -197,12 +142,7 @@ def _cmd_reset(args: argparse.Namespace, _cfg: Config, _client: Client) -> int:
     if not args.yes:
         print("reset deletes lock files and the schedule state; re-run with --yes to confirm", file=sys.stderr)
         return 2
-    removed = 0
-    for path in [*settings.LOCK_DIR.glob("*.lock"), *settings.STATE_PATH.parent.glob("state.*")]:
-        path.unlink()
-        removed += 1
-    if settings.LOCK_DIR.is_dir() and not any(settings.LOCK_DIR.iterdir()):
-        shutil.rmtree(settings.LOCK_DIR, ignore_errors=True)
+    removed = ops.reset_state()
     print(f"reset: removed {removed} file(s); the restic repository and your config are untouched")
     return 0
 
@@ -217,6 +157,8 @@ def build_parser() -> argparse.ArgumentParser:
         return command
 
     add("config", _cmd_config, "validate config.yaml and the job files")
+    add("admin", None, "open the interactive administration console").add_argument(
+        "--unit", help="systemd unit name of this install, if it cannot be detected (e.g. jabs-snapshot-agent)")
     add("tick", _cmd_tick, "run the periodic work once (driven by the systemd timer)")
     run = add("run", _cmd_run, "run one backup job now")
     run.add_argument("job", help="job name (config/jobs/NAME.yaml) or a path to a job file")
@@ -254,6 +196,10 @@ def main(argv: Optional[list] = None) -> int:
     level = logging.DEBUG if settings.env_mode() == "development" else logging.INFO
     logging.basicConfig(level=level, format=LOG_FORMAT, stream=sys.stderr)
     logging.getLogger().setLevel(level)
+    if args.command == "admin":  # must start even when config.yaml is broken: that is when it is needed
+        from . import admin
+
+        return admin.run(args.unit)
     try:
         cfg = config.load_config()
         client = Client.from_env(cfg)

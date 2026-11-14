@@ -1,0 +1,132 @@
+Screen {
+    background: $surface;
+}
+
+Pane {
+    height: 1fr;
+    padding: 0 1;
+}
+
+.note {
+    color: $text-muted;
+    margin: 1 0 0 0;
+}
+
+.detail {
+    border: round $primary-darken-2;
+    padding: 0 1;
+    margin: 1 0;
+    height: auto;
+    max-height: 10;
+}
+
+DataTable {
+    height: 1fr;
+    min-height: 5;
+    margin: 1 0 0 0;
+}
+
+.buttons {
+    height: auto;
+    margin: 1 0 0 0;
+}
+
+.buttons Button {
+    margin-right: 1;
+}
+
+RichLog {
+    height: 1fr;
+    min-height: 6;
+    margin-top: 1;
+    border: round $primary-darken-2;
+}
+
+#journal {
+    height: 2fr;
+}
+
+#docs-layout {
+    height: 1fr;
+}
+
+#docs-side {
+    width: 36;
+    margin-right: 1;
+}
+
+#docs-files {
+    height: 1fr;
+}
+
+#docs-viewer {
+    width: 1fr;
+    border: round $primary-darken-2;
+}
+
+/* Dialogs */
+ConfirmDialog, MessageDialog, ChoiceDialog, PickDialog, FormDialog, RunScreen {
+    align: center middle;
+}
+
+.dialog {
+    width: 64;
+    max-width: 96%;
+    max-height: 90%;
+    height: auto;
+    padding: 1 2;
+    background: $panel;
+    border: thick $primary;
+}
+
+.dialog.wide {
+    width: 90;
+}
+
+.dialog.run {
+    width: 120;
+    max-width: 98%;
+    height: 90%;
+}
+
+.dialog.run RichLog {
+    height: 1fr;
+    margin: 0 0 1 0;
+}
+
+.dialog.error {
+    border: thick $error;
+}
+
+.dialog-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.dialog-body {
+    height: auto;
+}
+
+.dialog-body.mono {
+    text-wrap: nowrap;
+}
+
+.dialog-scroll {
+    height: auto;
+    max-height: 60vh;
+}
+
+.dialog OptionList {
+    height: auto;
+    max-height: 16;
+}
+
+.help {
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+.error-text {
+    color: $error;
+    height: auto;
+}
