@@ -14,31 +14,41 @@ A JABS (Just Another Backup Script) agent that runs [restic](https://restic.net/
 
 ## Install
 
-```bash
-./setup.sh            # venv, dependencies, config/config.yaml, .env, an example job
-```
+Do these steps as the user that will own the install, in the install directory.
 
-`./setup.sh` never overwrites existing files. If it finds the old `config/global.yaml` it copies it to `config/config.yaml` once. If `python3` is older than 3.11, choose another interpreter: `PYTHON=python3.11 ./setup.sh` (needs `python3.11-venv`). Run it as the user that will own the install, not with `sudo`.
-
-Then:
-
-1. Edit `.env`: `RESTIC_PASSWORD` or `RESTIC_PASSWORD_FILE`, and optionally SMTP login and the dashboard URL and key.
-2. Edit `config/config.yaml`: `repo_path`, retention, email.
-3. Add jobs in `config/jobs/*.yaml` (copy `config/templates/job.yaml`) and enable a schedule.
-4. Create the repository and try a job:
+1. **Install.**
 
    ```bash
-   .venv/bin/python -m app init-repo
-   .venv/bin/python -m app run JOB --dry-run
+   ./setup.sh
    ```
 
-5. Install the timer:
+   It creates the virtual environment, installs the dependencies, copies the example `config/config.yaml`, `.env` and an example job (never overwriting existing files), and copies the old `config/global.yaml` to `config/config.yaml` once if it finds one. If `python3` is older than 3.11, choose another interpreter: `PYTHON=python3.11 ./setup.sh` (needs `python3.11-venv`). Do not run it with `sudo`.
+
+2. **Open the admin console.** The next steps use it; the [Admin console](#admin-console) section lists every tab.
+
+   ```bash
+   .venv/bin/python -m app admin
+   ```
+
+3. **Configure** (tab `3` Files). Select `.env` and press `e` to edit it in your system editor: set `RESTIC_PASSWORD` or `RESTIC_PASSWORD_FILE` and, if you want them, the SMTP login, `JABS_DASHBOARD_URL` and `JABS_AGENT_KEY` (register the agent on the dashboard host with `python -m app agent add NAME`). Do the same for `config.yaml`: `repo_path`, retention and email. The files document themselves, so leave what you do not need. The console checks each file when you close the editor and offers to revert a mistake.
+
+4. **Add your jobs** (tab `1` Jobs). Press `n` to create one from the template and open it in the editor, or `e` to edit the example job. Set the paths to back up and enable a schedule.
+
+5. **Create the repository** (tab `2` Repository): press `i`.
+
+6. **Test email** (tab `4` Diagnostics): press `m` to send a test message. With a dashboard configured, `h` sends one heartbeat to test the link.
+
+7. **Try a job** (tab `1` Jobs): select it and press `d` for a dry run. restic's output streams in a window.
+
+8. **Install the timer** (quit the console first, or use another terminal):
 
    ```bash
    sudo deploy/install.sh
    ```
 
-Check everything with `.venv/bin/python -m app config`. The [admin console](#admin-console) (`.venv/bin/python -m app admin`) can do every step above, and run jobs, from one screen.
+9. **Check it.** In the console, tab `5` Service shows the service and timer and `l` follows the journal; tab `4` Diagnostics `t` runs a tick now.
+
+Every step can also be done on the command line (`python -m app config`, `init-repo`, `run JOB --dry-run`; see [Commands](#commands)), and `python -m app config` checks everything at once.
 
 ### What `deploy/install.sh` does
 

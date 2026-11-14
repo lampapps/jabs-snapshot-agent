@@ -153,8 +153,6 @@ class JobsPane(Pane):
             await editing.edit_entry(self.admin, entry)
             await self.reload()
 
-    # ---------------------------------------------------------------- bindings and buttons
-
     async def do_delete(self) -> None:
         name = self.selected()
         job = self._jobs.get(name) if name else None
