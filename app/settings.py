@@ -1,13 +1,29 @@
 """Paths, constants and environment access. Tunables live in config/config.yaml, secrets in .env."""
 
+import logging
 import os
+import re
 import socket
 from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
 
-VERSION = "0.3.0"
+
+def read_version(path: Path) -> str:
+    """The MAJOR.MINOR.PATCH number in a VERSION file, or 'unknown' when it is missing or malformed."""
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        text = ""
+    if not re.fullmatch(r"\d+\.\d+\.\d+", text):
+        logging.getLogger(__name__).warning("%s is missing or not MAJOR.MINOR.PATCH; version is unknown", path)
+        return "unknown"
+    return text
+
+
+# The code's own file, not under JABS_HOME.
+VERSION = read_version(Path(__file__).resolve().parent.parent / "VERSION")
 AGENT_TYPE = "Snapshot"
 
 # JABS_HOME relocates everything the agent owns (used by tests and side-by-side installs).
