@@ -72,7 +72,7 @@ Logs go to the journal; the agent writes no log files. If you used the old cron-
 
 ## Configuration
 
-`config/config.yaml` (from `config/config.example.yaml`) holds the settings shared by all jobs; `config/jobs/*.yaml` can override retention, restic options, `repo_path` and `verify_after_backup` per job. Every key is documented in the example files. Secrets live only in `.env`: `RESTIC_PASSWORD` or `RESTIC_PASSWORD_FILE`, `JABS_SMTP_USER` and `JABS_SMTP_PASS`, `JABS_DASHBOARD_URL`, `JABS_AGENT_KEY`, `UPTIME_KUMA_URL`, `RESTIC_BIN`, `ENV_MODE`.
+`config/config.yaml` (from `config/config.example.yaml`) holds the settings shared by all jobs; `config/jobs/*.yaml` can override retention, restic options, `repo_path` and `verify_after_backup` per job. `config/config.example.yaml` documents every global key, and `config/templates/job.yaml` lists every job setting with comments. Secrets live only in `.env`: `RESTIC_PASSWORD` or `RESTIC_PASSWORD_FILE`, cloud repository credentials (see `.env.example`), `JABS_SMTP_USER` and `JABS_SMTP_PASS`, `JABS_DASHBOARD_URL`, `JABS_AGENT_KEY`, `UPTIME_KUMA_URL`, `RESTIC_BIN`, `ENV_MODE`.
 
 Blank values in YAML (`retention:`) mean "use the default".
 
@@ -148,7 +148,7 @@ Run it as the user that owns the install; it refuses to start as root when the i
 - **One restic repository per machine.** Jobs on the machine share it and are told apart by restic tags, so retention (`forget --prune`) and restores can be scoped to one job.
 - **No database.** Restic's snapshot index is the source of truth. The agent keeps a lock file per job and a small `data/state.json` (which schedule slots were served, each job's last result, when storage was last reported).
 - **restic must be installed** and on `PATH` (or set `RESTIC_BIN` in `.env`). The agent never downloads it.
-- **Local or remote repositories.** Anything restic accepts as `repo_path` works; free-space reporting only applies to local paths.
+- **Local or remote repositories.** Anything restic accepts as `repo_path` works, including S3, B2, SFTP, REST servers and rclone remotes; the address forms are in `config/templates/job.yaml` and the credentials go in `.env`. The agent passes `repo_path` and the environment straight to restic, so free-space reporting and the service's write access (`deploy/install.sh`) apply to local paths only.
 
 ## Dashboard integration (optional)
 

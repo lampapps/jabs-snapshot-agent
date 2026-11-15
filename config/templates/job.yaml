@@ -1,53 +1,90 @@
-# Example job config — copy this file to config/jobs/<job_name>.yaml and edit.
+# =============================================================================
+# JABS Snapshot Agent job
+# =============================================================================
+# Copy this file to config/jobs/<name>.yaml (the admin console's New job does it
+# and fills in the name). Every setting a job can have is listed here; the
+# uncommented ones are the minimum. Settings that also exist in config.yaml are
+# overrides: leave them commented out to use the global value, and see
+# config.example.yaml for what each one means.
 
+# Name shown in the console and on the dashboard. Defaults to the file name.
 job_name: "example"
 
 # One or more paths to back up into a single snapshot.
 paths:
   - "/path/to/back/up"
 
-# Tags identify this job's snapshots within the machine's shared repo, and
-# scope `restic forget --prune`/`restic find` to just this job.
+# Tags identify this job's snapshots in the machine's shared repository and
+# scope `forget --prune`, `find` and size reporting to just this job. Give every
+# job its own tag and keep it stable: snapshots with an old tag fall outside the
+# job's retention.
 tags:
   - "example"
 
+# When to run, as 5-field cron expressions evaluated by the agent. List several
+# to run at different times; a job due on more than one still runs once.
+# A schedule is ignored until enabled is true.
 schedules:
   - cron: "0 3 * * *"    # 3:00 AM daily
     enabled: false
+  # - cron: "0 */6 * * *"  # every 6 hours
+  #   enabled: false
 
-# Run `restic forget --prune` (scoped to this job's tags) after each backup.
+# Run `restic forget --prune` for this job's tags after each backup, using the
+# retention policy below (or the global one).
 prune_after_backup: true
 
-# Uncomment to override the global verify_after_backup setting for this job.
+# Run a quick `restic check` after each backup (default: the global setting).
 # verify_after_backup: true
 
-# Uncomment to override the global retention policy for this job.
-#retention:
-  #keep_last: 0
-  #keep_hourly: 0
-  #keep_daily: 7
-  #keep_weekly: 4
-  #keep_monthly: 6
-  #keep_yearly: 0
-  #keep_within: "30d"
-  #group_by: "host,paths"
-  #extra_forget_args: []
+# Repository for this job (default: repo_path in config.yaml). Anything restic
+# accepts works, and the password is the same RESTIC_PASSWORD[_FILE] as for the
+# global one. Cloud and remote repositories need their credentials as
+# environment variables in .env (see .env.example), never inside the address.
+# repo_path: "/mnt/nas/restic/jim"                 # local path or mounted share
+# repo_path: "s3:s3.amazonaws.com/my-bucket/jim"   # Amazon S3 (or "s3:https://host/bucket" for S3-compatible)
+# repo_path: "b2:my-bucket:jim"                    # Backblaze B2
+# repo_path: "sftp:backup@nas:/srv/restic/jim"     # SFTP; uses the service user's SSH key
+# repo_path: "rest:https://nas:8000/jim"           # restic REST server
+# repo_path: "rclone:remote:path"                  # needs rclone and its config for the service user
+# After changing a local repo_path, run `sudo deploy/install.sh` again so the
+# service may write there.
 
-# Uncomment to override any global restic_options for this job only (see
-# config.yaml for the full list and descriptions).
-#restic_options:
-  #limit_upload: 0
-  #limit_download: 0
-  #compression: "auto"
-  #one_file_system: false
-  #exclude_caches: true
-  #exclude_if_present: []
-  #exclude_larger_than: "1G"
-  #host: ""
-  #read_concurrency: 0
-  #extra_backup_args: []
+# Retention for this job: only the keys you set replace the global policy, so
+# `keep_daily: 0` switches that rule off for this job. Details in
+# config.example.yaml.
+# retention:
+#   keep_last: 0
+#   keep_hourly: 0
+#   keep_daily: 7
+#   keep_weekly: 4
+#   keep_monthly: 6
+#   keep_yearly: 0
+#   keep_within: "30d"
+#   group_by: "host,paths"
+#   extra_forget_args: []     # any other `restic forget` flags
 
-# Uncomment to add job-specific excludes on top of the common list.
-#exclude:
-  #- "Downloads/"
-  #- "Videos/"
+# restic tuning for this job: only the keys you set replace the global value.
+# Details in config.example.yaml.
+# restic_options:
+#   limit_upload: 0              # KiB/s, 0 = unlimited
+#   limit_download: 0            # KiB/s, 0 = unlimited
+#   compression: "auto"          # auto | max | off
+#   pack_size: 0                 # target pack file size in MiB, 0 = restic default
+#   cache_dir: ""                # restic metadata cache location
+#   no_cache: false              # do not use the local cache
+#   retry_lock: "5m"             # wait this long for a repository lock
+#   one_file_system: false       # do not cross mount points
+#   exclude_caches: true         # skip directories holding a CACHEDIR.TAG
+#   exclude_if_present: []       # skip directories containing one of these files
+#   exclude_larger_than: "1G"    # skip files above this size
+#   host: ""                     # hostname recorded on this job's snapshots
+#   read_concurrency: 0          # concurrent file reads, 0 = restic default
+#   extra_backup_args: []        # any other `restic backup` flags
+
+# Patterns to skip, added to config/common_exclude.yaml (which applies to every
+# job while use_common_exclude is true in config.yaml). restic --exclude pattern
+# syntax; * and ? are wildcards.
+# exclude:
+#   - "Downloads/"
+#   - "*.tmp"

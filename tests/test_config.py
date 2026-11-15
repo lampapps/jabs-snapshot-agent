@@ -1,4 +1,8 @@
+import re
+from pathlib import Path
+
 import pytest
+import yaml
 
 from app import config
 from app.config import ConfigError
@@ -147,3 +151,42 @@ class TestJobs:
         write_job(home, "b", 'job_name: same\npaths: [/d]\n')
         _, errors = config.load_jobs(config.load_config())
         assert any("same" in e and "more than one" in e for e in errors)
+
+
+class TestJobTemplate:
+    TEMPLATE = Path(__file__).resolve().parent.parent / "config" / "templates" / "job.yaml"
+
+    def text(self) -> str:
+        return self.TEMPLATE.read_text(encoding="utf-8")
+
+    def uncommented(self, key: str) -> dict:
+        """The commented-out `key:` block of the template, uncommented and parsed."""
+        lines, found = [], False
+        for line in self.text().splitlines():
+            if re.match(rf"^# {key}:", line):
+                found = True
+                lines.append(line[2:])
+            elif found and line.startswith("#   "):
+                lines.append(line[2:])
+            elif found:
+                break
+        assert found, f"{key} is not in the template"
+        return yaml.safe_load("\n".join(lines))
+
+    def test_the_template_is_a_valid_job(self, home):
+        write_config(home)
+        write_job(home, "example", self.text())
+        job = config.find_job("example", config.load_config())
+        assert job.name == "example" and job.tags == ["example"] and not job.enabled_crons()
+
+    def test_every_setting_a_job_can_have_is_listed(self):
+        text = self.text()
+        names = set(config.JobFile.model_fields) | set(config.Retention.model_fields) | set(config.ResticOptions.model_fields)
+        missing = sorted(name for name in names if not re.search(rf"^#? ?\s*{name}:", text, re.M))
+        assert not missing
+
+    def test_the_commented_overrides_are_valid_when_uncommented(self):
+        merged = {}
+        for key in ("retention", "restic_options", "exclude"):
+            merged.update(self.uncommented(key))
+        config.JobFile.model_validate({"paths": ["/p"], **merged})

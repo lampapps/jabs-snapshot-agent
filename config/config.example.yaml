@@ -20,6 +20,8 @@ hostname: ""
 # ONE restic repository per machine is the recommended convention (see
 # README.md) — jobs on this machine share this repo and are distinguished by
 # restic tags, not separate repos. Replace <hostname> with this machine's name.
+# Cloud and remote repositories work too: see config/templates/job.yaml for the
+# address forms and .env.example for the credentials.
 repo_path: "/mnt/nas-unas/restic-repos/<hostname>"
 
 # --- Default retention (restic's native `forget` keep-* policy) ---
