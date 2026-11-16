@@ -74,6 +74,13 @@ def uptime_kuma_url() -> str:
     return (os.environ.get("UPTIME_KUMA_URL") or "").strip()
 
 
+def smtp_login() -> tuple:
+    """(username, password) for the SMTP server. The older JABS_SMTP_USER / JABS_SMTP_PASS are still accepted."""
+    user = os.environ.get("JABS_SMTP_USERNAME") or os.environ.get("JABS_SMTP_USER") or ""
+    password = os.environ.get("JABS_SMTP_PASSWORD") or os.environ.get("JABS_SMTP_PASS") or ""
+    return user, password
+
+
 def machine_hostname(override: Optional[str] = None) -> str:
     """The name this agent reports for its machine: the configured override, else the system hostname."""
     return override or socket.gethostname()

@@ -1,7 +1,6 @@
 """Immediate email alerts for backup events (errors, completions), standalone of any dashboard."""
 
 import logging
-import os
 import smtplib
 import ssl
 from email.message import EmailMessage
@@ -25,11 +24,10 @@ def send(email: EmailConfig, subject: str, body: str) -> bool:
     if not is_configured(email):
         logger.debug("email is not configured (smtp_server and to_addrs); not sending '%s'", subject)
         return False
-    user = os.environ.get("JABS_SMTP_USER", "")
-    password = os.environ.get("JABS_SMTP_PASS", "")
+    user, password = settings.smtp_login()
     sender = email.from_addr or user
     if not sender:
-        logger.error("no sender address: set email.from_addr or JABS_SMTP_USER")
+        logger.error("no sender address: set email.from_addr or JABS_SMTP_USERNAME")
         return False
     if settings.env_mode() == "development":
         subject = f"[DEV] {subject}"

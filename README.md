@@ -31,7 +31,7 @@ Do these steps as the user that will own the install, in the install directory.
    .venv/bin/python -m app admin
    ```
 
-3. **Configure** (tab `3` Files). Select `.env` and press `e` to edit it in your system editor: set `RESTIC_PASSWORD` or `RESTIC_PASSWORD_FILE` and, if you want them, the SMTP login, `JABS_DASHBOARD_URL` and `JABS_AGENT_KEY` (register the agent on the dashboard host with `python -m app agent add NAME`). Do the same for `config.yaml`: `repo_path`, retention and email. The files document themselves, so leave what you do not need. The console checks each file when you close the editor and offers to revert a mistake.
+3. **Configure** (tab `3` Files). Select `.env` and press `e` to edit it in your system editor: set `RESTIC_PASSWORD` or `RESTIC_PASSWORD_FILE` and, if you want them, the SMTP login, `JABS_DASHBOARD_URL` and `JABS_AGENT_KEY` (register the agent on the dashboard host with `.venv/bin/python -m app agent add NAME`). Do the same for `config.yaml`: `repo_path`, retention and email. The files document themselves, so leave what you do not need. The console checks each file when you close the editor and offers to revert a mistake.
 
 4. **Add your jobs** (tab `1` Jobs). Press `n` to create one from the template and open it in the editor, or `e` to edit the example job. Set the paths to back up and enable a schedule.
 
@@ -49,7 +49,7 @@ Do these steps as the user that will own the install, in the install directory.
 
 9. **Check it.** In the console, tab `5` Service shows the service and timer and `l` follows the journal; tab `4` Diagnostics `t` runs a tick now.
 
-Every step can also be done on the command line (`python -m app config`, `init-repo`, `run JOB --dry-run`; see [Commands](#commands)), and `python -m app config` checks everything at once.
+Every step can also be done on the command line (`.venv/bin/python -m app config`, `init-repo`, `run JOB --dry-run`; see [Commands](#commands)), and `.venv/bin/python -m app config` checks everything at once.
 
 ### What `deploy/install.sh` does
 
@@ -73,7 +73,7 @@ Logs go to the journal; the agent writes no log files. If you used the old cron-
 
 ## Configuration
 
-`config/config.yaml` (from `config/config.example.yaml`) holds the settings shared by all jobs; `config/jobs/*.yaml` can override retention, restic options, `repo_path` and `verify_after_backup` per job. `config/config.example.yaml` documents every global key, and `config/templates/job.yaml` lists every job setting with comments. Secrets live only in `.env`: `RESTIC_PASSWORD` or `RESTIC_PASSWORD_FILE`, cloud repository credentials (see `.env.example`), `JABS_SMTP_USER` and `JABS_SMTP_PASS`, `JABS_DASHBOARD_URL`, `JABS_AGENT_KEY`, `UPTIME_KUMA_URL`, `RESTIC_BIN`, `ENV_MODE`.
+`config/config.yaml` (from `config/config.example.yaml`) holds the settings shared by all jobs; `config/jobs/*.yaml` can override retention, restic options, `repo_path` and `verify_after_backup` per job. `config/config.example.yaml` documents every global key, and `config/templates/job.yaml` lists every job setting with comments. Secrets live only in `.env`: `RESTIC_PASSWORD` or `RESTIC_PASSWORD_FILE`, cloud repository credentials (see `.env.example`), `JABS_SMTP_USERNAME` and `JABS_SMTP_PASSWORD`, `JABS_DASHBOARD_URL`, `JABS_AGENT_KEY`, `UPTIME_KUMA_URL`, `RESTIC_BIN`, `ENV_MODE`.
 
 Blank values in YAML (`retention:`) mean "use the default".
 
@@ -153,7 +153,7 @@ Run it as the user that owns the install; it refuses to start as root when the i
 
 ## Dashboard integration (optional)
 
-Set `JABS_DASHBOARD_URL` and `JABS_AGENT_KEY` in `.env` (register the agent on the dashboard host with `python -m app agent add NAME`). Leave them empty, or set `dashboard.enabled: false` in `config.yaml`, to run standalone; `python -m app config` says which mode is active.
+Set `JABS_DASHBOARD_URL` and `JABS_AGENT_KEY` in `.env` (register the agent on the dashboard host with `.venv/bin/python -m app agent add NAME`). Leave them empty, or set `dashboard.enabled: false` in `config.yaml`, to run standalone; `.venv/bin/python -m app config` says which mode is active.
 
 What the dashboard receives:
 
