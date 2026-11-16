@@ -41,11 +41,11 @@ prune_after_backup: true
 # accepts works, and the password is the same RESTIC_PASSWORD[_FILE] as for the
 # global one. Cloud and remote repositories need their credentials as
 # environment variables in .env (see .env.example), never inside the address.
-# repo_path: "/mnt/nas/restic/jim"                 # local path or mounted share
-# repo_path: "s3:s3.amazonaws.com/my-bucket/jim"   # Amazon S3 (or "s3:https://host/bucket" for S3-compatible)
-# repo_path: "b2:my-bucket:jim"                    # Backblaze B2
-# repo_path: "sftp:backup@nas:/srv/restic/jim"     # SFTP; uses the service user's SSH key
-# repo_path: "rest:https://nas:8000/jim"           # restic REST server
+# repo_path: "/mnt/nas/restic/backups"                 # local path or mounted share
+# repo_path: "s3:s3.amazonaws.com/my-bucket/backups"   # Amazon S3 (or "s3:https://host/bucket" for S3-compatible)
+# repo_path: "b2:my-bucket:backups"                    # Backblaze B2
+# repo_path: "sftp:backup@nas:/srv/restic/backups"     # SFTP; uses the service user's SSH key
+# repo_path: "rest:https://nas:8000/backups"           # restic REST server
 # repo_path: "rclone:remote:path"                  # needs rclone and its config for the service user
 # After changing a local repo_path, run `sudo deploy/install.sh` again so the
 # service may write there.
