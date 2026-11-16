@@ -11,6 +11,7 @@ A JABS (Just Another Backup Script) agent that runs [restic](https://restic.net/
 - Python 3.11 or newer with `python3-venv`
 - [restic](https://restic.readthedocs.io/en/stable/020_installation.html)
 - systemd, for the timer (without it, run `python -m app tick` from anything that can run a command every few minutes)
+- Optional: a JABS dashboard (`dashboardv2`) to report to; storage reporting needs its `/api/v2/storage` endpoint
 
 ## Install
 
