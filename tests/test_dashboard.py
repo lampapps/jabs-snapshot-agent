@@ -93,9 +93,12 @@ class TestJobs:
         assert [r.levelno for r in caplog.records if "/api/v2/jobs" in r.getMessage()] == [logging.WARNING]
 
     def test_the_payload_has_the_paths_as_source_and_the_repository_as_destination(self):
-        job = SimpleNamespace(name="jim-home", paths=["/home/jim", "/etc"], repo_path="s3:s3.amazonaws.com/b/jim")
-        assert dashboard.jobs_payload([job]) == [{"job_name": "jim-home", "targets": [{
-            "name": "jim-home", "source": "/home/jim\n/etc", "destination": "s3:s3.amazonaws.com/b/jim"}]}]
+        job = SimpleNamespace(name="jim-home", paths=["/home/jim", "/etc"], repo_path="s3:s3.amazonaws.com/b/jim",
+                              schedules=[SimpleNamespace(cron="0 0 * * *", enabled=True),
+                                         SimpleNamespace(cron="0 9 * * 1", enabled=False)])
+        assert dashboard.jobs_payload([job]) == [{"job_name": "jim-home", "schedules": [
+            {"cron": "0 0 * * *", "enabled": True}, {"cron": "0 9 * * 1", "enabled": False}], "targets": [{
+                "name": "jim-home", "source": "/home/jim\n/etc", "destination": "s3:s3.amazonaws.com/b/jim"}]}]
 
     @pytest.mark.parametrize("repo,shown", [
         ("rest:https://jim:s3cret@backup.lan:8000/jim", "rest:https://jim@backup.lan:8000/jim"),
@@ -105,7 +108,7 @@ class TestJobs:
         ("/srv/restic/repo", "/srv/restic/repo"),
     ])
     def test_a_password_in_the_repository_url_never_leaves_the_agent(self, repo, shown):
-        job = SimpleNamespace(name="j", paths=["/d"], repo_path=repo)
+        job = SimpleNamespace(name="j", paths=["/d"], repo_path=repo, schedules=[])
         (entry,) = dashboard.jobs_payload([job])
         assert entry["targets"][0]["destination"] == shown
         assert "s3cret" not in str(entry) and ":pw@" not in str(entry)

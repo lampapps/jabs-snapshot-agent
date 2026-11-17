@@ -24,9 +24,10 @@ def redact_repo(repo_path: str) -> str:
 
 
 def jobs_payload(jobs: list) -> list:
-    """What /api/v2/jobs takes: each job's paths as its source and its repository as its destination."""
-    return [{"job_name": job.name, "targets": [{"name": job.name, "source": "\n".join(job.paths),
-                                               "destination": redact_repo(job.repo_path)}]} for job in jobs]
+    """What /api/v2/jobs takes: each job's schedules (disabled too), its paths as the source and repository as the destination."""
+    return [{"job_name": job.name, "schedules": [{"cron": s.cron, "enabled": s.enabled} for s in job.schedules],
+             "targets": [{"name": job.name, "source": "\n".join(job.paths),
+                          "destination": redact_repo(job.repo_path)}]} for job in jobs]
 COOLDOWN_S = 30
 
 

@@ -11,7 +11,7 @@ A JABS (Just Another Backup Script) agent that runs [restic](https://restic.net/
 - Python 3.11 or newer with `python3-venv`
 - [restic](https://restic.readthedocs.io/en/stable/020_installation.html)
 - systemd, for the timer (without it, run `python -m app tick` from anything that can run a command every few minutes)
-- Optional: a JABS dashboard (`dashboardv2`) to report to; storage reporting needs its `/api/v2/storage` endpoint and the job list on the Agents page needs `/api/v2/jobs` (dashboard 0.3.0 or newer)
+- Optional: a JABS dashboard (`dashboardv2`) to report to; storage reporting needs its `/api/v2/storage` endpoint and the job list on the Agents page needs `/api/v2/jobs` (dashboard 0.3.0 or newer; 0.4.0 also shows whether each schedule is enabled)
 
 ## Install
 
@@ -158,7 +158,7 @@ Set `JABS_DASHBOARD_URL` and `JABS_AGENT_KEY` in `.env` (register the agent on t
 What the dashboard receives:
 
 - **Events** for every run (start, stages, progress about every 5 seconds, completion, check result, snapshots removed by pruning) and a heartbeat with each job's schedule on every tick. Every request carries the machine's **hostname** (`hostname:` in `config.yaml`, else the system name) so jobs on different machines with the same name stay apart.
-- **Jobs** on every tick: each job's paths (as its source) and repository (as its destination), which the Agents page lists beside the job's schedule. A password embedded in a repository URL (`rest:https://user:password@host/`) is removed before sending. An older dashboard without the endpoint is ignored.
+- **Jobs** on every tick: each job's schedules (disabled ones too, marked as such), paths (as its source) and repository (as its destination), which the Agents page lists for each job. A password embedded in a repository URL (`rest:https://user:password@host/`) is removed before sending. An older dashboard without the endpoint is ignored.
 - **Storage** (`storage:` in `config.yaml`): free and used space of the volume holding a local repository (every 15 minutes), the repository's size (every 12 hours; `restic stats` can be slow on big repositories), and the size of each job's latest snapshot after each backup (`source_size: false` turns it off).
 
 Dashboard problems are logged and never change a backup's result.

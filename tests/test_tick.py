@@ -74,6 +74,9 @@ def test_the_heartbeat_reports_each_job_with_its_source_and_repository(jobs, ran
     reported = {entry["job_name"]: entry["targets"] for entry in call[1][0]}
     assert sorted(reported) == ["daily", "hourly", "manual"]  # manual-only jobs too: it is the config, not the schedule
     assert reported["daily"] == [{"name": "daily", "source": "/data", "destination": "/tmp/repo"}]
+    schedules = {entry["job_name"]: entry["schedules"] for entry in call[1][0]}
+    assert schedules == {"daily": [{"cron": "0 3 * * *", "enabled": True}],
+                         "hourly": [{"cron": "0 * * * *", "enabled": True}], "manual": []}
     assert client.names().index("send_jobs") > client.names().index("send_scheduler_check")
 
 
