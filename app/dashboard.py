@@ -1,6 +1,7 @@
 """The only place that talks to the JABS dashboard. Every method is a no-op returning False in standalone mode."""
 
 import logging
+import re
 import time
 from typing import Optional
 
@@ -12,6 +13,20 @@ from .config import Config
 logger = logging.getLogger(__name__)
 
 # After a connection failure, skip the dashboard this long so a down dashboard cannot stall a backup.
+COOLDOWN_S = 30
+
+# restic accepts scheme://user:password@host repository URLs; the password must never reach the dashboard.
+_URL_PASSWORD = re.compile(r"(://[^/@:\s]*):[^/@\s]*@")
+
+
+def redact_repo(repo_path: str) -> str:
+    return _URL_PASSWORD.sub(r"\1@", repo_path)
+
+
+def jobs_payload(jobs: list) -> list:
+    """What /api/v2/jobs takes: each job's paths as its source and its repository as its destination."""
+    return [{"job_name": job.name, "targets": [{"name": job.name, "source": "\n".join(job.paths),
+                                               "destination": redact_repo(job.repo_path)}]} for job in jobs]
 COOLDOWN_S = 30
 
 
@@ -52,13 +67,14 @@ class Client:
             logger.debug("dashboard request %s failed: %s", path, exc)
             return None
 
-    def _post_ok(self, path: str, payload: dict, ok: tuple = (200, 201)) -> bool:
+    def _post_ok(self, path: str, payload: dict, ok: tuple = (200, 201), quiet: tuple = ()) -> bool:
         response = self._post(path, payload)
         if response is None:
             return False
         if response.status_code in ok:
             return True
-        logger.warning("dashboard rejected %s: %s %s", path, response.status_code, response.text[:200])
+        level = logging.DEBUG if response.status_code in quiet else logging.WARNING
+        logger.log(level, "dashboard rejected %s: %s %s", path, response.status_code, response.text[:200])
         return False
 
     # ------------------------------------------------------------ events
@@ -157,6 +173,12 @@ class Client:
             "target_id": target_id, "external_ids": external_ids, "timestamp": int(time.time()),
             "message": message or f"restic forget --prune removed {len(external_ids)} snapshot(s)",
         }, ok=(200,))
+
+    # ------------------------------------------------------------ jobs
+
+    def send_jobs(self, jobs: list) -> bool:
+        """Every configured job with its source and destination, for the Agents page; needs dashboard 0.3.0+."""
+        return self._post_ok("/api/v2/jobs", {"hostname": self.hostname, "jobs": jobs}, quiet=(404,))
 
     # ------------------------------------------------------------ storage
 

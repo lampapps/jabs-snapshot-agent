@@ -69,6 +69,46 @@ class TestMode:
         assert client.send_job_schedule("j", "0 3 * * *") is False
         assert client.send_target_purged("j", ["abc"]) is False
         assert client.post_storage([{"name": "n"}]) is False
+        assert client.send_jobs([{"job_name": "j", "targets": []}]) is False
+
+
+class TestJobs:
+    def test_the_jobs_go_to_the_v2_endpoint_with_the_hostname(self, posts):
+        jobs = [{"job_name": "j", "targets": [{"name": "j", "source": "/data", "destination": "/repo"}]}]
+        assert live("P3Tiny").send_jobs(jobs) is True
+        call = posts.calls[0]
+        assert call.url == "http://dash:5002/api/v2/jobs" and call.headers == {"X-API-Key": "key123"}
+        assert call.json == {"hostname": "P3Tiny", "jobs": jobs}
+
+    def test_an_old_dashboard_without_the_endpoint_is_not_a_warning(self, posts, caplog):
+        posts.status = 404
+        with caplog.at_level(logging.DEBUG):
+            assert live().send_jobs([]) is False
+        assert [r.levelno for r in caplog.records if "/api/v2/jobs" in r.getMessage()] == [logging.DEBUG]
+
+    def test_any_other_rejection_is_still_a_warning(self, posts, caplog):
+        posts.status = 400
+        with caplog.at_level(logging.DEBUG):
+            live().send_jobs([])
+        assert [r.levelno for r in caplog.records if "/api/v2/jobs" in r.getMessage()] == [logging.WARNING]
+
+    def test_the_payload_has_the_paths_as_source_and_the_repository_as_destination(self):
+        job = SimpleNamespace(name="jim-home", paths=["/home/jim", "/etc"], repo_path="s3:s3.amazonaws.com/b/jim")
+        assert dashboard.jobs_payload([job]) == [{"job_name": "jim-home", "targets": [{
+            "name": "jim-home", "source": "/home/jim\n/etc", "destination": "s3:s3.amazonaws.com/b/jim"}]}]
+
+    @pytest.mark.parametrize("repo,shown", [
+        ("rest:https://jim:s3cret@backup.lan:8000/jim", "rest:https://jim@backup.lan:8000/jim"),
+        ("rest:http://:pw@host/repo", "rest:http://@host/repo"),
+        ("s3:s3.amazonaws.com/bucket/jim", "s3:s3.amazonaws.com/bucket/jim"),
+        ("sftp:jim@nas:/srv/restic", "sftp:jim@nas:/srv/restic"),
+        ("/srv/restic/repo", "/srv/restic/repo"),
+    ])
+    def test_a_password_in_the_repository_url_never_leaves_the_agent(self, repo, shown):
+        job = SimpleNamespace(name="j", paths=["/d"], repo_path=repo)
+        (entry,) = dashboard.jobs_payload([job])
+        assert entry["targets"][0]["destination"] == shown
+        assert "s3cret" not in str(entry) and ":pw@" not in str(entry)
 
 
 class TestEvents:

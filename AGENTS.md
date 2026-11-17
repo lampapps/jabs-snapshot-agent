@@ -6,7 +6,7 @@ Runs restic backups on a systemd timer; optionally reports to a JABS dashboard. 
 
 - The dashboard is optional. `app/dashboard.py` is the only module that talks to it, and every method is a no-op when `JABS_DASHBOARD_URL` or `JABS_AGENT_KEY` is unset (or `dashboard.enabled: false`). A dashboard failure never changes a backup's result and never raises.
 - `app/restic.py` is the only module that runs the `restic` binary. The repository and password reach it through environment variables, never as arguments, and must never be logged.
-- API contract with the dashboard: v1 endpoints `/api/monitoring/events` and `/api/monitoring/target-purged`, plus `POST /api/v2/storage`. Every payload carries `hostname`. See `../dashboardv2/README.md`.
+- API contract with the dashboard: v1 endpoints `/api/monitoring/events` and `/api/monitoring/target-purged`, plus `POST /api/v2/storage` and `POST /api/v2/jobs` (each job's `paths` and `repo_path`, password removed from URLs). Every payload carries `hostname`. See `../dashboardv2/README.md`.
 - Scheduling is by systemd timer running `python -m app tick`; there is no cron and no daemon. Due-ness is state based (`app/schedule.py`), so it is correct at any tick interval.
 
 ## Stack and layout

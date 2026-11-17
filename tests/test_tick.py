@@ -67,6 +67,16 @@ def test_the_heartbeat_reports_each_schedule(jobs, ran):
     assert client.names()[0] == "send_scheduler_check"  # first, so it goes out even if a backup runs long
 
 
+def test_the_heartbeat_reports_each_job_with_its_source_and_repository(jobs, ran):
+    client = Recorder()
+    run_tick(client, at(2027, 1, 15, 8, 2))
+    (call,) = [c for c in client.calls if c[0] == "send_jobs"]
+    reported = {entry["job_name"]: entry["targets"] for entry in call[1][0]}
+    assert sorted(reported) == ["daily", "hourly", "manual"]  # manual-only jobs too: it is the config, not the schedule
+    assert reported["daily"] == [{"name": "daily", "source": "/data", "destination": "/tmp/repo"}]
+    assert client.names().index("send_jobs") > client.names().index("send_scheduler_check")
+
+
 def test_the_due_count_is_in_the_heartbeat(jobs, ran):
     run_tick(now=at(2027, 1, 15, 2, 58))
     client = Recorder()
