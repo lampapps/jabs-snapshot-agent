@@ -4,9 +4,11 @@ from app import state, storage
 from app.config import Config, Job, ResticOptions
 from app.restic import ResticError
 
+from .conftest import jid
+
 
 def make_job(name="jim-home", tags=("jim-home",), repo="/mnt/nas/repo", paths=("/data",), host=""):
-    return Job(name=name, path="x.yaml", repo_path=repo, paths=list(paths), tags=list(tags), schedules=[],
+    return Job(job_id=jid(name), name=name, path="x.yaml", repo_path=repo, paths=list(paths), tags=list(tags), schedules=[],
                prune_after_backup=False, verify_after_backup=True, retention={}, restic_options=ResticOptions(host=host),
                exclude=[])
 

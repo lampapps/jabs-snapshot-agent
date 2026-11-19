@@ -1,13 +1,20 @@
 # =============================================================================
 # JABS Snapshot Agent job
 # =============================================================================
-# Copy this file to config/jobs/<name>.yaml (the admin console's New job does it
-# and fills in the name). Every setting a job can have is listed here; the
-# uncommented ones are the minimum. Settings that also exist in config.yaml are
-# overrides: leave them commented out to use the global value, and see
-# config.example.yaml for what each one means.
+# Use `python -m app job new NAME` (or the admin console's New job): it copies
+# this file to config/jobs/NAME.yaml, fills in the name and gives the job its
+# id. Every setting a job can have is listed here; the uncommented ones are the
+# minimum. Settings that also exist in config.yaml are overrides: leave them
+# commented out to use the global value, and see config.example.yaml for what
+# each one means.
 
-# Name shown in the console and on the dashboard. Defaults to the file name.
+# Identifies this job on the dashboard and in the agent's state, so the job can
+# be renamed without losing its history. Never edit or copy it: a copied job
+# file needs its own id (delete the line and run `python -m app job adopt`).
+job_id: "00000000-0000-4000-8000-000000000000"
+
+# Name shown in the console and on the dashboard. May be changed at any time.
+# Defaults to the file name.
 job_name: "example"
 
 # One or more paths to back up into a single snapshot.
@@ -15,11 +22,12 @@ paths:
   - "/path/to/back/up"
 
 # Tags identify this job's snapshots in the machine's shared repository and
-# scope `forget --prune`, `find` and size reporting to just this job. Give every
-# job its own tag and keep it stable: snapshots with an old tag fall outside the
-# job's retention.
-tags:
-  - "example"
+# scope `forget --prune`, `find` and size reporting to just this job. Omit them
+# and the job's id is the tag, which is stable even if the job is renamed. Set
+# them only to keep the tag of snapshots taken earlier, and then never change
+# them: snapshots with an old tag fall outside the job's retention.
+# tags:
+#   - "example"
 
 # When to run, as 5-field cron expressions evaluated by the agent. List several
 # to run at different times; a job due on more than one still runs once.

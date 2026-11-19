@@ -47,14 +47,15 @@ def transaction(path: Optional[Path] = None) -> Iterator[dict]:
         os.replace(tmp, target)
 
 
-def job_entry(data: dict, name: str) -> dict:
-    return data.setdefault("jobs", {}).setdefault(name, {})
+def job_entry(data: dict, job_id: str) -> dict:
+    """One job's entry; jobs are keyed by their id, so renaming a job keeps its state."""
+    return data.setdefault("jobs", {}).setdefault(job_id, {})
 
 
-def record_run(name: str, result: dict, path: Optional[Path] = None) -> None:
+def record_run(job_id: str, result: dict, path: Optional[Path] = None) -> None:
     """Remember a job's latest outcome so `jobs` can show it without a dashboard."""
     try:
         with transaction(path) as data:
-            job_entry(data, name)["last_run"] = result
+            job_entry(data, job_id)["last_run"] = result
     except (OSError, portalocker.exceptions.LockException) as exc:
-        logger.warning("could not record the result of %s: %s", name, exc)
+        logger.warning("could not record the result of %s: %s", job_id, exc)

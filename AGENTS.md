@@ -6,7 +6,7 @@ Runs restic backups on a systemd timer; optionally reports to a JABS dashboard. 
 
 - The dashboard is optional. `app/dashboard.py` is the only module that talks to it, and every method is a no-op when `JABS_DASHBOARD_URL` or `JABS_AGENT_KEY` is unset (or `dashboard.enabled: false`). A dashboard failure never changes a backup's result and never raises.
 - `app/restic.py` is the only module that runs the `restic` binary. The repository and password reach it through environment variables, never as arguments, and must never be logged.
-- API contract with the dashboard: v1 endpoints `/api/monitoring/events` and `/api/monitoring/target-purged`, plus `POST /api/v2/storage` and `POST /api/v2/jobs` (each job's `paths` and `repo_path`, password removed from URLs). Every payload carries `hostname`. See `../dashboardv2/README.md`.
+- API contract with the dashboard (`../dashboardv2/docs/AGENTS_API_GUIDE.md`): `POST /api/v2/heartbeat`, `/api/v2/events`, `/api/v2/purge`, `/api/v2/jobs` (each job's schedules, `paths` and `repo_path`, password removed from URLs) and `/api/v2/storage`. Every payload carries `hostname`. Identity is by id: every event, purge and jobs entry carries the job's `job_id`, and the single target's `target_id` is the same id; `job_name` and `target_label` are labels only. State, lock files and the default restic tag are keyed by `job_id`, never by a name. A job file must have a valid, unique `job_id`: the loader rejects one without (naming `job adopt`) and the template's nil-UUID placeholder.
 - Scheduling is by systemd timer running `python -m app tick`; there is no cron and no daemon. Due-ness is state based (`app/schedule.py`), so it is correct at any tick interval.
 
 ## Stack and layout

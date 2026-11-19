@@ -4,7 +4,7 @@ from app import locking, runner, state
 from app.config import Config, Job, ResticOptions
 from app.restic import ResticError
 
-from .conftest import write_config
+from .conftest import jid, write_config
 
 
 class Recorder:
@@ -28,7 +28,7 @@ class Recorder:
 
 
 def make_job(**overrides) -> Job:
-    values = dict(name="jim-home", path="x.yaml", repo_path="/repo", paths=["/data"], tags=["jim-home"], schedules=[],
+    values = dict(job_id=jid("jim-home"), name="jim-home", path="x.yaml", repo_path="/repo", paths=["/data"], tags=["jim-home"], schedules=[],
                   prune_after_backup=False, verify_after_backup=True, retention={"keep_daily": 7},
                   restic_options=ResticOptions(), exclude=["*.tmp"])
     values.update(overrides)
@@ -87,7 +87,8 @@ class TestSuccess:
         assert client.names() == ["send_backup_start", "send_backup_stage", "send_backup_complete",
                                   "send_backup_stage", "send_check_result", "post_storage"]
         complete = client.first("send_backup_complete")
-        assert complete[1][:4] == ("jim-home", "snapshot", "jim-home", "jim-home")  # target_id is the job name
+        # the job id comes first, and is also the target id: a rename changes only the labels
+        assert complete[1][:5] == (jid("jim-home"), "jim-home", "snapshot", jid("jim-home"), "jim-home")
         assert complete[2]["success"] is True and complete[2]["snapshot_id"] == "a" * 64
         assert (complete[2]["files_backed_up"], complete[2]["bytes_backed_up"]) == (3, 500)
         run_ids = {c[2]["run_id"] for c in client.calls if "run_id" in c[2]}
@@ -101,7 +102,7 @@ class TestSuccess:
 
     def test_the_result_is_remembered_and_kuma_is_pinged(self, env):
         run()
-        last = state.read()["jobs"]["jim-home"]["last_run"]
+        last = state.read()["jobs"][jid("jim-home")]["last_run"]
         assert last["success"] is True and last["snapshot_id"] == "a" * 64 and last["files"] == 3
         assert env.pings == [("up", "jim-home: OK", False)]
 
@@ -117,7 +118,7 @@ class TestSuccess:
         client = Recorder(enabled=False)
         run(client=client)
         assert "post_storage" not in client.names()
-        assert state.read()["jobs"]["jim-home"]["last_run"]["success"] is True
+        assert state.read()["jobs"][jid("jim-home")]["last_run"]["success"] is True
 
 
 class TestStorageReport:
@@ -166,7 +167,7 @@ class TestVerifyAndPrune:
         run(job=make_job(prune_after_backup=True), client=client)
         _, args, kwargs = env.restic_calls("forget_prune")[0]
         assert kwargs["keep_daily"] == 7 and kwargs["tags"] == ["jim-home"] and args == ("/repo",)
-        assert client.first("send_target_purged")[1] == ("jim-home", ["x" * 64])
+        assert client.first("send_target_purged")[1] == (jid("jim-home"), jid("jim-home"), ["x" * 64])
 
     def test_pruning_can_be_requested_on_the_command_line(self, env):
         run(do_prune=True)
@@ -187,7 +188,7 @@ class TestFailures:
         complete = client.first("send_backup_complete")
         assert complete[2]["success"] is False and "disk full" in complete[2]["error_message"]
         assert env.notices[0][:2] == ("error", "JABS snapshot backup FAILED: jim-home")
-        last = state.read()["jobs"]["jim-home"]["last_run"]
+        last = state.read()["jobs"][jid("jim-home")]["last_run"]
         assert last["success"] is False and "disk full" in last["error"]
         assert env.pings[0][0] == "down"
 
@@ -211,7 +212,7 @@ class TestFailures:
         assert client.calls == [] and state.read() == {}
 
     def test_a_job_that_is_already_running_is_skipped_quietly(self, env):
-        held = locking.acquire_lock(runner.lock_path("jim-home"))
+        held = locking.acquire_lock(runner.lock_path(jid("jim-home")))
         try:
             client = Recorder()
             assert run(client=client) is False
@@ -225,6 +226,14 @@ class TestFailures:
             def __getattr__(self, name):
                 return lambda *a, **k: False
         assert run(client=Down()) is True
+
+
+def test_the_lock_and_the_state_follow_the_job_id_not_its_name(env, home):
+    first = make_job(name="old name")
+    run(job=first)
+    renamed = make_job(name="new name")
+    run(job=renamed)
+    assert list(state.read()["jobs"]) == [jid("jim-home")]
 
 
 def test_lock_names_are_filesystem_safe(home):

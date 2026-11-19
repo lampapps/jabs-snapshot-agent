@@ -12,7 +12,7 @@ from app import admin, config, ops, settings
 from app.admin import checks, editor, logs, runscreen, service, util
 from app.admin.panes import PANES
 
-from .conftest import write_config, write_job
+from .conftest import write_config, write_job, jid
 
 
 def leaf_commands(parser, prefix=""):
@@ -171,23 +171,55 @@ class TestChecks:
         write_job(home, "b")
         assert [e["label"] for e in checks.managed_files()][3:] == ["jobs/a.yaml", "jobs/b.yaml"]
 
-    def test_new_job_files_come_from_the_template_with_the_name_filled_in(self, home):
+    def test_new_job_files_come_from_the_template_with_the_name_and_a_fresh_id(self, home):
         (settings.CONFIG_DIR / "templates").mkdir()
-        (settings.CONFIG_DIR / "templates" / "job.yaml").write_text('job_name: "example"\ntags:\n  - "example"\npaths: ["/p"]\n')
-        path = checks.new_job_file("photos")
+        (settings.CONFIG_DIR / "templates" / "job.yaml").write_text(
+            f'job_id: "{config.NIL_JOB_ID}"\njob_name: "example"\npaths: ["/p"]\n')
+        path = ops.new_job("photos")
         assert path == settings.JOBS_DIR / "photos.yaml"
-        assert path.read_text() == 'job_name: "photos"\ntags:\n  - "photos"\npaths: ["/p"]\n'
+        job = config.load_job(path, config.load_config()) if write_config(home) is None else None
+        assert job.name == "photos" and config.NIL_JOB_ID not in path.read_text()
+        other = ops.new_job("videos")
+        assert config.load_job(other, config.load_config()).job_id != job.job_id
         with pytest.raises(ValueError, match="already exists"):
-            checks.new_job_file("photos")
+            ops.new_job("photos")
 
     @pytest.mark.parametrize("name", ["", "bad name", "../x", "-lead", "x" * 70])
     def test_new_job_names_are_validated(self, home, name):
         with pytest.raises(ValueError):
-            checks.new_job_file(name)
+            ops.new_job(name)
 
     def test_a_missing_template_is_reported(self, home):
         with pytest.raises(ValueError, match="template"):
-            checks.new_job_file("a")
+            ops.new_job("a")
+
+    def test_adopt_adds_a_missing_id_and_leaves_the_rest_alone(self, home):
+        write_config(home)
+        text = "# my notes\n\njob_name: old\npaths:\n  - /d   # keep\n"
+        path = home / "config" / "jobs" / "old.yaml"
+        path.write_text(text)
+        new_id = ops.adopt_job(path)
+        written = path.read_text()
+        assert f'job_id: "{new_id}"' in written and "# my notes" in written and "paths:\n  - /d   # keep\n" in written
+        assert config.load_job(path, config.load_config()).job_id == new_id
+        assert ops.adopt_job(path) is None and path.read_text() == written
+
+    def test_adopt_replaces_the_templates_placeholder(self, home):
+        write_config(home)
+        path = home / "config" / "jobs" / "copy.yaml"
+        path.write_text(f'job_id: "{config.NIL_JOB_ID}"  # from the template\npaths: [/d]\n')
+        new_id = ops.adopt_job(path)
+        assert new_id and config.NIL_JOB_ID not in path.read_text()
+        assert path.read_text().count("job_id") == 1
+
+    def test_adopt_jobs_covers_every_file_without_an_id(self, home):
+        write_config(home)
+        write_job(home, "has")
+        (home / "config" / "jobs" / "lacks.yaml").write_text("paths: [/d]\n")
+        changed = ops.adopt_jobs()
+        assert [p.name for p, _ in changed] == ["lacks.yaml"]
+        _, errors = config.load_jobs(config.load_config())
+        assert errors == []
 
     def test_revert_restores_content_and_removes_files_that_did_not_exist(self, tmp_path):
         path = tmp_path / "f"
@@ -335,8 +367,8 @@ class TestOps:
         write_config(home)
         write_job(home, "a", 'paths: [/d]\nschedules:\n  - cron: "0 3 * * *"\n    enabled: true\n')
         write_job(home, "b", "paths: [/d]\n")
-        state.record_run("a", {"success": False, "finished_at": 1_800_000_000})
-        lock = locking.acquire_lock(runner.lock_path("b"))
+        state.record_run(jid("a"), {"success": False, "finished_at": 1_800_000_000})
+        lock = locking.acquire_lock(runner.lock_path(jid("b")))
         try:
             rows, errors = ops.jobs_overview(config.load_config())
         finally:
@@ -350,14 +382,14 @@ class TestOps:
         from app import runner
 
         settings.LOCK_DIR.mkdir(parents=True)
-        open(runner.lock_path("a"), "w", encoding="utf-8").write("{}")
+        open(runner.lock_path(jid("a")), "w", encoding="utf-8").write("{}")
         assert ops.job_lock_info("a") is None
         assert ops.job_lock_info("never-ran") is None
 
     def test_reset_removes_locks_and_state_only(self, home):
         from app import state
 
-        state.record_run("a", {"success": True, "finished_at": 1})
+        state.record_run(jid("a"), {"success": True, "finished_at": 1})
         settings.LOCK_DIR.mkdir(parents=True, exist_ok=True)
         (settings.LOCK_DIR / "a.lock").write_text("{}")
         (home / "keep.txt").write_text("x")
@@ -380,15 +412,15 @@ class TestOps:
         write_config(home)
         path = write_job(home, "a")
         write_job(home, "b")
-        state.record_run("a", {"success": True, "finished_at": 1})
-        state.record_run("b", {"success": True, "finished_at": 1})
+        state.record_run(jid("a"), {"success": True, "finished_at": 1})
+        state.record_run(jid("b"), {"success": True, "finished_at": 1})
         ops.delete_job(config.find_job("a", config.load_config()))
-        assert not path.exists() and list(state.read()["jobs"]) == ["b"]
+        assert not path.exists() and list(state.read()["jobs"]) == [jid("b")]
 
     def test_delete_job_refuses_files_outside_the_jobs_directory(self, home, tmp_path):
         write_config(home)
         outside = tmp_path / "elsewhere.yaml"
-        outside.write_text("paths: [/d]\n")
+        outside.write_text(f'job_id: "{jid("outside")}"\npaths: [/d]\n')
         job = config.load_job(outside, config.load_config())
         with pytest.raises(config.ConfigError, match="delete it by hand"):
             ops.delete_job(job)
@@ -399,7 +431,7 @@ class TestOps:
 
         write_config(home)
         path = write_job(home, "a")
-        lock = locking.acquire_lock(runner.lock_path("a"))
+        lock = locking.acquire_lock(runner.lock_path(jid("a")))
         try:
             with pytest.raises(config.ConfigError, match="is running"):
                 ops.delete_job(config.find_job("a", config.load_config()))

@@ -5,7 +5,7 @@ import pytest
 from app import config, runner, schedule, state, storage, tick
 from app.config import Config
 
-from .conftest import write_config, write_job
+from .conftest import write_config, write_job, jid
 from .test_runner import Recorder
 
 UTC = timezone.utc
@@ -40,7 +40,7 @@ def test_the_first_tick_only_sets_baselines(jobs, ran):
     client = Recorder()
     run_tick(client, at(2027, 1, 15, 8, 2))
     assert ran == []
-    assert client.first("send_scheduler_check")[1] == (0,)
+    assert client.first("send_heartbeat")[1] == ()
 
 
 def test_a_job_runs_when_its_slot_arrives(jobs, ran):
@@ -59,12 +59,11 @@ def test_a_missed_slot_runs_once_at_the_next_tick(jobs, ran):
     assert sorted(ran) == ["daily", "hourly"]
 
 
-def test_the_heartbeat_reports_each_schedule(jobs, ran):
+def test_the_heartbeat_goes_out_first_and_carries_no_schedule_of_its_own(jobs, ran):
     client = Recorder()
     run_tick(client, at(2027, 1, 15, 8, 2))
-    reported = {args for name, args, _ in client.calls if name == "send_job_schedule"}
-    assert reported == {("daily", "0 3 * * *"), ("hourly", "0 * * * *")}  # manual-only jobs have none
-    assert client.names()[0] == "send_scheduler_check"  # first, so it goes out even if a backup runs long
+    assert client.names()[0] == "send_heartbeat"  # first, so it goes out even if a backup runs long
+    assert "send_job_schedule" not in client.names()  # schedules travel in the jobs report
 
 
 def test_the_heartbeat_reports_each_job_with_its_source_and_repository(jobs, ran):
@@ -73,18 +72,21 @@ def test_the_heartbeat_reports_each_job_with_its_source_and_repository(jobs, ran
     (call,) = [c for c in client.calls if c[0] == "send_jobs"]
     reported = {entry["job_name"]: entry["targets"] for entry in call[1][0]}
     assert sorted(reported) == ["daily", "hourly", "manual"]  # manual-only jobs too: it is the config, not the schedule
-    assert reported["daily"] == [{"name": "daily", "source": "/data", "destination": "/tmp/repo"}]
+    assert reported["daily"] == [{"target_id": jid("daily"), "target_label": "daily", "source": "/data",
+                                  "destination": "/tmp/repo"}]
+    assert {entry["job_name"]: entry["job_id"] for entry in call[1][0]} == {
+        name: jid(name) for name in ("daily", "hourly", "manual")}
     schedules = {entry["job_name"]: entry["schedules"] for entry in call[1][0]}
     assert schedules == {"daily": [{"cron": "0 3 * * *", "enabled": True}],
                          "hourly": [{"cron": "0 * * * *", "enabled": True}], "manual": []}
-    assert client.names().index("send_jobs") > client.names().index("send_scheduler_check")
+    assert client.names().index("send_jobs") > client.names().index("send_heartbeat")
 
 
 def test_the_due_count_is_in_the_heartbeat(jobs, ran):
     run_tick(now=at(2027, 1, 15, 2, 58))
     client = Recorder()
     run_tick(client, at(2027, 1, 15, 3, 2))
-    assert client.first("send_scheduler_check")[1] == (2,)
+    assert client.first("send_heartbeat")[1] == ()
 
 
 def test_a_crashing_job_does_not_stop_the_others(jobs, monkeypatch):
@@ -115,7 +117,7 @@ def test_a_failure_to_plan_still_sends_the_heartbeat(jobs, ran, monkeypatch):
     monkeypatch.setattr(config, "load_jobs", broken)
     client = Recorder()
     run_tick(client, at(2027, 1, 15, 3, 2))
-    assert client.first("send_scheduler_check")[1] == (0,) and ran == []
+    assert client.first("send_heartbeat")[1] == () and ran == []
 
 
 def test_a_job_that_became_due_while_another_ran_is_served_next_tick(jobs, ran, monkeypatch):
@@ -156,7 +158,7 @@ def test_a_corrupt_state_file_does_not_stop_a_tick(jobs, ran):
     (jobs / "data").mkdir(exist_ok=True)
     (jobs / "data" / "state.json").write_text("{broken")
     run_tick(now=at(2027, 1, 15, 8))
-    assert state.read()["jobs"]["daily"]["served"]
+    assert state.read()["jobs"][jid("daily")]["served"]
 
 
 def test_local_now_is_timezone_aware():

@@ -25,11 +25,7 @@ class Tick:
             self.due = schedule.due_jobs(self.jobs, data, self.now)
 
     def heartbeat(self) -> None:
-        self.client.send_scheduler_check(len(self.due))
-        for job in self.jobs:
-            crons = job.enabled_crons()
-            if crons:
-                self.client.send_job_schedule(job.name, ",".join(crons))
+        self.client.send_heartbeat()
         self.client.send_jobs(dashboard.jobs_payload(self.jobs))
 
     def run_due_jobs(self) -> None:

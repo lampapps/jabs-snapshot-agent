@@ -7,7 +7,7 @@ import yaml
 from app import config
 from app.config import ConfigError
 
-from .conftest import write_config, write_job
+from .conftest import jid, write_config, write_job
 
 
 def test_defaults_need_only_a_repo_path(home):
@@ -85,7 +85,11 @@ class TestJobs:
 
     def test_name_defaults_to_the_file_name(self, home):
         job = self.load(home, "paths: [/data]\n")
-        assert job.name == "jim-home" and job.tags == []
+        assert job.name == "jim-home" and job.job_id == jid("jim-home")
+
+    def test_tags_default_to_the_job_id_and_explicit_tags_are_kept(self, home):
+        assert self.load(home, "paths: [/data]\n").tags == [jid("jim-home")]
+        assert self.load(home, "paths: [/data]\ntags: [old-tag]\n").tags == ["old-tag"]
 
     def test_overrides_replace_only_the_keys_they_name(self, home):
         job = self.load(home, "paths: [/d]\nverify_after_backup: true\nretention: {keep_daily: 3}\n"
@@ -128,15 +132,52 @@ class TestJobs:
         with pytest.raises(ConfigError, match="repo_path"):
             self.load(home, "paths: [/d]\n", "dashboard: {enabled: true}\n")
 
-    def test_find_job_by_file_name_job_name_or_path(self, home):
+    def test_find_job_by_id_file_name_job_name_or_path(self, home):
         write_config(home)
         path = write_job(home, "file-name", 'job_name: "shown-name"\npaths: [/d]\n')
         cfg = config.load_config()
         assert config.find_job("file-name", cfg).name == "shown-name"
         assert config.find_job("shown-name", cfg).path == str(path)
         assert config.find_job(str(path), cfg).name == "shown-name"
+        assert config.find_job(jid("file-name"), cfg).path == str(path)
         with pytest.raises(ConfigError, match="not found"):
             config.find_job("nope", cfg)
+
+    def test_a_job_file_without_an_id_names_the_fix(self, home):
+        write_config(home)
+        path = write_job(home, "old", "# an old file\npaths: [/d]\n")
+        path.write_text("# an old file\npaths: [/d]\n")
+        with pytest.raises(ConfigError, match="job adopt old.yaml"):
+            config.load_job(path, config.load_config())
+
+    def test_the_templates_placeholder_id_is_refused(self, home):
+        write_config(home)
+        path = write_job(home, "copy", f'job_id: "{config.NIL_JOB_ID}"\npaths: [/d]\n')
+        with pytest.raises(ConfigError, match="placeholder"):
+            config.load_job(path, config.load_config())
+
+    @pytest.mark.parametrize("bad", ["not-a-uuid", "1234", "ABCDEF12-0000-4000-8000-000000000000"])
+    def test_a_malformed_id_is_refused(self, home, bad):
+        write_config(home)
+        path = write_job(home, "bad", f'job_id: "{bad}"\npaths: [/d]\n')
+        with pytest.raises(ConfigError, match="job_id"):
+            config.load_job(path, config.load_config())
+
+    def test_two_files_with_the_same_id_are_reported(self, home):
+        write_config(home)
+        write_job(home, "a", f'job_id: "{jid("x")}"\njob_name: a\npaths: [/d]\n')
+        write_job(home, "b", f'job_id: "{jid("x")}"\njob_name: b\npaths: [/d]\n')
+        _, errors = config.load_jobs(config.load_config())
+        assert any(jid("x") in e and "more than one" in e and "job adopt" in e for e in errors)
+
+    def test_renaming_a_job_keeps_its_id(self, home):
+        write_config(home)
+        path = write_job(home, "a", f'job_id: "{jid("x")}"\njob_name: old\npaths: [/d]\n')
+        cfg = config.load_config()
+        before = config.load_job(path, cfg)
+        path.write_text(path.read_text().replace("job_name: old", "job_name: new"))
+        after = config.load_job(path, cfg)
+        assert (before.job_id, before.name, after.job_id, after.name) == (jid("x"), "old", jid("x"), "new")
 
     def test_one_broken_file_does_not_hide_the_others(self, home):
         write_config(home)
@@ -175,9 +216,16 @@ class TestJobTemplate:
 
     def test_the_template_is_a_valid_job(self, home):
         write_config(home)
-        write_job(home, "example", self.text())
+        write_job(home, "example", self.text().replace(config.NIL_JOB_ID, jid("example")))
         job = config.find_job("example", config.load_config())
-        assert job.name == "example" and job.tags == ["example"] and not job.enabled_crons()
+        assert job.name == "example" and job.job_id == jid("example") and job.tags == [jid("example")]
+        assert not job.enabled_crons()
+
+    def test_the_template_ships_the_placeholder_id(self, home):
+        write_config(home)
+        write_job(home, "example", self.text())
+        with pytest.raises(ConfigError, match="placeholder"):
+            config.find_job("example", config.load_config())
 
     def test_every_setting_a_job_can_have_is_listed(self):
         text = self.text()

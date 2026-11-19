@@ -45,13 +45,16 @@ if [[ -z $(ls -A config/jobs 2>/dev/null) ]]; then
     copy_if_missing config/templates/job.yaml config/jobs/example.yaml
 fi
 
+# Job files from before job ids (0.6.0), and the example copied above, get their id here.
+.venv/bin/python -m app job adopt || true
+
 .venv/bin/python -m app config
 
 cat <<EOT
 
 Next steps:
   1. Edit config/config.yaml (repo_path, retention, email) and .env (restic password, optional dashboard URL and key).
-  2. Add jobs in config/jobs/*.yaml (copy config/templates/job.yaml) and enable a schedule.
+  2. Add jobs:               .venv/bin/python -m app job new NAME   (then edit config/jobs/NAME.yaml and enable a schedule)
   3. Create the repository:  .venv/bin/python -m app init-repo
   4. Try a job:              .venv/bin/python -m app run JOB --dry-run
   5. Install the timer:      sudo deploy/install.sh        (add --read-all to back up files you do not own)

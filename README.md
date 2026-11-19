@@ -11,7 +11,7 @@ A JABS (Just Another Backup Script) agent that runs [restic](https://restic.net/
 - Python 3.11 or newer with `python3-venv`
 - [restic](https://restic.readthedocs.io/en/stable/020_installation.html)
 - systemd, for the timer (without it, run `python -m app tick` from anything that can run a command every few minutes)
-- Optional: a JABS dashboard (`dashboardv2`) to report to; storage reporting needs its `/api/v2/storage` endpoint and the job list on the Agents page needs `/api/v2/jobs` (dashboard 0.3.0 or newer; 0.4.0 also shows whether each schedule is enabled)
+- Optional: a JABS dashboard (`dashboardv2`) to report to; it must be 0.5.0 or newer (the agent talks to its `/api/v2/` endpoints and identifies jobs by id)
 
 ## Install
 
@@ -33,7 +33,7 @@ Do these steps as the user that will own the install, in the install directory.
 
 3. **Configure** (tab `3` Files). Select `.env` and press `e` to edit it in your system editor: set `RESTIC_PASSWORD` or `RESTIC_PASSWORD_FILE` and, if you want them, the SMTP login, `JABS_DASHBOARD_URL` and `JABS_AGENT_KEY` (register the agent on the dashboard host with `.venv/bin/python -m app agent add NAME`). Do the same for `config.yaml`: `repo_path`, retention and email. The files document themselves, so leave what you do not need. The console checks each file when you close the editor and offers to revert a mistake.
 
-4. **Add your jobs** (tab `1` Jobs). Press `n` to create one from the template and open it in the editor, or `e` to edit the example job. Set the paths to back up and enable a schedule.
+4. **Add your jobs** (tab `1` Jobs). Press `n` to create one from the template (it gets its own job id) and open it in the editor, or `e` to edit the example job. Set the paths to back up and enable a schedule. Job files from before 0.6.0 have no id: press `i` (or run `.venv/bin/python -m app job adopt`) once to give them one.
 
 5. **Create the repository** (tab `2` Repository): press `i`.
 
@@ -77,6 +77,10 @@ Logs go to the journal; the agent writes no log files. If you used the old cron-
 
 Blank values in YAML (`retention:`) mean "use the default".
 
+**Job identity.** Every job file has a `job_id` (a UUID that `job new` and the console's New job write). It identifies the job on the dashboard, in the agent's state and lock file, and is the job's default restic tag; the file name and `job_name` are only labels, so you can rename both without losing history. Never edit or copy a `job_id`: a copied file needs its own (delete the line and run `job adopt`). The agent refuses a job file without a valid, unique id and says how to fix it.
+
+**Tags.** If a job sets no `tags:`, its snapshots are tagged with its `job_id`. A job that already has snapshots under another tag (jobs from before 0.6.0) keeps that tag by listing it in `tags:`; never change it afterwards, because snapshots with an old tag fall outside the job's retention.
+
 An optional Uptime Kuma push monitor gets an `up` or `down` ping after each run (not on dry runs).
 
 ## Usage
@@ -103,14 +107,16 @@ Run as `.venv/bin/python -m app <command>`.
 | `config` | Validate `config.yaml` and the job files; shows whether the dashboard is in use |
 | `admin [--unit NAME]` | Open the interactive [admin console](#admin-console) |
 | `tick` | Run what is due, report to the dashboard (the timer does this) |
-| `run JOB [--init] [--prune] [--dry-run]` | Run one job now; `--dry-run` still reports to the dashboard |
+| `run JOB [--init] [--prune] [--dry-run]` | Run one job now (JOB is its id, name, file name or path); `--dry-run` still reports to the dashboard |
 | `init-repo` | Create the repository if it does not exist |
 | `check [--deep] [--subset 5%]` | Verify the repository; metadata only unless `--deep` or `--subset` (slow, reads data) |
-| `snapshots [--job NAME]` | List snapshots |
+| `snapshots [--job JOB]` | List snapshots, or one job's (id or name) |
 | `ls SNAPSHOT [PATH]` | List the files in a snapshot |
 | `restore SNAPSHOT TARGET [--path P]` | Restore a snapshot, or one path of it, into TARGET |
 | `find [QUERY]` | Search all snapshots for a file by partial, case-insensitive name |
 | `jobs` | Each job's next scheduled run and last result |
+| `job new NAME` | Create `config/jobs/NAME.yaml` from the template with a new job id and its schedule disabled |
+| `job adopt [FILE ...]` | Give job files that have no `job_id` one (every file in `config/jobs` by default); needed once after upgrading from 0.5 |
 | `testmail` | Send a test email with the SMTP settings |
 | `report-storage [--print]` | Measure and report storage now |
 | `reset --yes` | Delete lock files and the schedule state (never the repository or your config) |
@@ -124,7 +130,7 @@ A cheap `restic check` (metadata only) runs after every backup unless `verify_af
 
 | Tab | What you can do |
 | --- | --- |
-| 1 Jobs | Each job's schedule, next run, last result and whether it is running now. **Dry run** (`d`) or **Back up now** (`b`) runs the job in a window that streams restic's output, with a Stop button (interrupts so the run cleans up). Options: create the repository first, prune afterwards. Edit a job file (`e`), create one from the template (`n`) or delete one (`x`: you type its name to confirm; its snapshots stay in the repository) |
+| 1 Jobs | Each job's schedule, next run, last result and whether it is running now. **Dry run** (`d`) or **Back up now** (`b`) runs the job in a window that streams restic's output, with a Stop button (interrupts so the run cleans up). Options: create the repository first, prune afterwards. Edit a job file (`e`), create one from the template (`n`), give old job files an id (`i`) or delete one (`x`: you type its name to confirm; its snapshots stay in the repository) |
 | 2 Repository | Snapshots (filter by job), list a snapshot's files, restore a snapshot or one path, find a file across all snapshots, check the repository (quick, sample or deep) and create it |
 | 3 Files | Check `config.yaml`, `.env`, `common_exclude.yaml` and every job file, and edit any of them in your system editor (`$VISUAL`, `$EDITOR`, else the system default such as nano). A file is validated when you leave the editor: edit again, revert or keep. The agent reads its files at the start of every run, so a valid edit applies at the next tick; if the directories the sandboxed service may write change, it offers to reinstall the units |
 | 4 Diagnostics | Run the tick now, send a test mail, measure storage, test the dashboard link (sends one heartbeat), show the schedule state, list the writable directories, reset the schedule state (typed confirmation) |
@@ -146,8 +152,8 @@ Run it as the user that owns the install; it refuses to start as root when the i
 
 ## How it works
 
-- **One restic repository per machine.** Jobs on the machine share it and are told apart by restic tags, so retention (`forget --prune`) and restores can be scoped to one job.
-- **No database.** Restic's snapshot index is the source of truth. The agent keeps a lock file per job and a small `data/state.json` (which schedule slots were served, each job's last result, when storage was last reported).
+- **One restic repository per machine.** Jobs on the machine share it and are told apart by restic tags (by default the job's id), so retention (`forget --prune`) and restores can be scoped to one job.
+- **No database.** Restic's snapshot index is the source of truth. The agent keeps a lock file per job and a small `data/state.json` (which schedule slots were served, each job's last result, when storage was last reported), both keyed by job id.
 - **restic must be installed** and on `PATH` (or set `RESTIC_BIN` in `.env`). The agent never downloads it.
 - **Local or remote repositories.** Anything restic accepts as `repo_path` works, including S3, B2, SFTP, REST servers and rclone remotes; the address forms are in `config/templates/job.yaml` and the credentials go in `.env`. The agent passes `repo_path` and the environment straight to restic, so free-space reporting and the service's write access (`deploy/install.sh`) apply to local paths only.
 
@@ -157,8 +163,8 @@ Set `JABS_DASHBOARD_URL` and `JABS_AGENT_KEY` in `.env` (register the agent on t
 
 What the dashboard receives:
 
-- **Events** for every run (start, stages, progress about every 5 seconds, completion, check result, snapshots removed by pruning) and a heartbeat with each job's schedule on every tick. Every request carries the machine's **hostname** (`hostname:` in `config.yaml`, else the system name) so jobs on different machines with the same name stay apart.
-- **Jobs** on every tick: each job's schedules (disabled ones too, marked as such), paths (as its source) and repository (as its destination), which the Agents page lists for each job. A password embedded in a repository URL (`rest:https://user:password@host/`) is removed before sending. An older dashboard without the endpoint is ignored.
+- **Events** for every run (start, stages, progress about every 5 seconds, completion, check result, snapshots removed by pruning) and a heartbeat on every tick. Every event carries the job's `job_id` (also its `target_id`: a snapshot job has one target) and the labels `job_name`/`target_label`, so renaming a job changes only the label shown. Every request carries the machine's **hostname** (`hostname:` in `config.yaml`, else the system name) so jobs on different machines with the same name stay apart.
+- **Jobs** on every tick: each job's schedules (disabled ones too, marked as such), paths (as its source) and repository (as its destination), which the Agents page lists for each job. A password embedded in a repository URL (`rest:https://user:password@host/`) is removed before sending.
 - **Storage** (`storage:` in `config.yaml`): free and used space of the volume holding a local repository (every 15 minutes), the repository's size (every 12 hours; `restic stats` can be slow on big repositories), and the size of each job's latest snapshot after each backup (`source_size: false` turns it off).
 
 Dashboard problems are logged and never change a backup's result.

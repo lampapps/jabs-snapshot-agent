@@ -13,6 +13,9 @@ from . import settings
 PathLike = Union[str, Path]
 
 HOST_PATTERN = r"^([A-Za-z0-9][A-Za-z0-9._-]{0,63})?$"
+JOB_ID_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+# The template ships this placeholder; `job new` and `job adopt` replace it with a real id.
+NIL_JOB_ID = "00000000-0000-4000-8000-000000000000"
 EMAIL_ADDRESS = re.compile(r"^[^@\s<>]+@[^@\s<>]+$")
 
 
@@ -139,6 +142,7 @@ class Schedule(_Model):
 class JobFile(_Model):
     """One config/jobs/*.yaml; retention and restic_options hold only the keys this job overrides."""
 
+    job_id: Optional[str] = Field(None, pattern=JOB_ID_PATTERN)
     job_name: Optional[str] = Field(None, min_length=1, max_length=200)
     paths: list[str] = Field(min_length=1)
     tags: list[str] = Field(default_factory=list)
@@ -149,6 +153,13 @@ class JobFile(_Model):
     retention: dict = Field(default_factory=dict)
     restic_options: dict = Field(default_factory=dict)
     exclude: list[str] = Field(default_factory=list)
+
+    @field_validator("job_id")
+    @classmethod
+    def _real_id(cls, value: Optional[str]) -> Optional[str]:
+        if value == NIL_JOB_ID:
+            raise ValueError("is the template's placeholder; run `python -m app job adopt` to give the job an id")
+        return value
 
     @field_validator("retention")
     @classmethod
@@ -164,8 +175,9 @@ class JobFile(_Model):
 
 
 class Job(_Model):
-    """A job with the global settings merged in."""
+    """A job with the global settings merged in. `job_id` is its identity; `name` is only a label."""
 
+    job_id: str
     name: str
     path: str
     repo_path: str
@@ -249,12 +261,15 @@ def load_job(path: PathLike, cfg: Config) -> Job:
         raw = JobFile.model_validate(_read_mapping(path))
     except ValidationError as exc:
         raise ConfigError(_format_errors(path, exc)) from exc
+    if not raw.job_id:
+        raise ConfigError(f"{path}: no job_id; run `python -m app job adopt {path.name}` to give the job its id")
     repo_path = raw.repo_path or cfg.repo_path
     if not repo_path:
         raise ConfigError(f"{path}: no repo_path (set it in config.yaml or in the job)")
     exclude = (_common_excludes() if cfg.use_common_exclude else []) + raw.exclude
     return Job(
-        name=raw.job_name or path.stem, path=str(path), repo_path=repo_path, paths=raw.paths, tags=raw.tags,
+        job_id=raw.job_id, name=raw.job_name or path.stem, path=str(path), repo_path=repo_path, paths=raw.paths,
+        tags=raw.tags or [raw.job_id],
         schedules=raw.schedules, prune_after_backup=raw.prune_after_backup,
         verify_after_backup=cfg.verify_after_backup if raw.verify_after_backup is None else raw.verify_after_backup,
         retention=Retention.model_validate({**cfg.retention.model_dump(), **_set_keys(raw.retention)}),
@@ -264,7 +279,7 @@ def load_job(path: PathLike, cfg: Config) -> Job:
 
 
 def find_job(ref: str, cfg: Config) -> Job:
-    """Resolve a job given as a name (config/jobs/NAME.yaml), a job_name, or a path to a YAML file."""
+    """Resolve a job given as a job id, a file name (config/jobs/NAME.yaml), a job_name, or a path to a YAML file."""
     candidate = Path(ref)
     if ref.endswith((".yaml", ".yml")) and candidate.exists():
         return load_job(candidate, cfg)
@@ -273,7 +288,7 @@ def find_job(ref: str, cfg: Config) -> Job:
         return load_job(by_file, cfg)
     jobs, _ = load_jobs(cfg)
     for job in jobs:
-        if job.name == ref:
+        if ref in (job.job_id, job.name):
             return job
     raise ConfigError(f"job '{ref}' not found (looked for {by_file})")
 
@@ -286,6 +301,11 @@ def load_jobs(cfg: Config) -> tuple:
             jobs.append(load_job(path, cfg))
         except ConfigError as exc:
             errors.append(str(exc))
+    ids = [job.job_id for job in jobs]
+    for job_id in sorted({i for i in ids if ids.count(i) > 1}):
+        files = ", ".join(Path(job.path).name for job in jobs if job.job_id == job_id)
+        errors.append(f"job_id {job_id} is used by more than one file ({files}); a copied job file needs its own id "
+                      "(delete its job_id line and run `python -m app job adopt`)")
     names = [job.name for job in jobs]
     for name in sorted({n for n in names if names.count(n) > 1}):
         errors.append(f"job name '{name}' is used by more than one file in {settings.JOBS_DIR}")

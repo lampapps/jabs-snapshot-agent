@@ -14,6 +14,8 @@ COVERAGE = {
     "tick": "diagnostics.tick",
     "run": "jobs.run",
     "jobs": "jobs.list",
+    "job new": "jobs.new",
+    "job adopt": "jobs.adopt",
     "init-repo": "repository.init",
     "check": "repository.check",
     "snapshots": "repository.snapshots",

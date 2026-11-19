@@ -3,7 +3,9 @@
 import json
 import logging
 import os
+import re
 import shutil
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -54,9 +56,10 @@ def check_repository(cfg: Config, deep: bool = False, subset: Optional[str] = No
                  read_data_subset=subset, global_args=restic.global_args_from(cfg.restic_options))
 
 
-def snapshot_list(cfg: Config, job_name: Optional[str] = None) -> list:
+def snapshot_list(cfg: Config, job: Optional[str] = None) -> list:
+    """Snapshots of the repository, or only of one job (given as its id, name or file)."""
     repo, (password, password_file) = repo_path(cfg), credentials()
-    tags = config.find_job(job_name, cfg).tags if job_name else None
+    tags = config.find_job(job, cfg).tags if job else None
     return restic.list_snapshots(repo, tags=tags, password=password, password_file=password_file,
                                  global_args=restic.global_args_from(cfg.restic_options))
 
@@ -99,9 +102,9 @@ def format_last(last: Optional[dict]) -> str:
     return f"{'ok' if last.get('success') else 'FAILED'} {format_when(last.get('finished_at'))}"
 
 
-def job_lock_info(name: str) -> Optional[dict]:
+def job_lock_info(job_id: str) -> Optional[dict]:
     """The holder's details when the job is running right now, else None. Probes only while a lock file exists."""
-    path = runner.lock_path(name)
+    path = runner.lock_path(job_id)
     if not os.path.exists(path):
         return None
     try:
@@ -126,9 +129,64 @@ def jobs_overview(cfg: Config, now: Optional[datetime] = None) -> tuple:
     data = state.read()
     now = now or schedule.local_now()
     rows = [{"job": job, "next": schedule.next_run(job, now),
-             "last": data.get("jobs", {}).get(job.name, {}).get("last_run"), "running": job_lock_info(job.name)}
+             "last": data.get("jobs", {}).get(job.job_id, {}).get("last_run"), "running": job_lock_info(job.job_id)}
             for job in jobs]
     return rows, errors
+
+
+JOB_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+TEMPLATE = Path("templates") / "job.yaml"
+_JOB_ID_LINE = re.compile(r"^job_id\s*:\s*[\"']?([^\"'#\s]*)[\"']?\s*(#.*)?$", re.MULTILINE)
+_ID_COMMENT = "# Identifies this job on the dashboard and in the agent's state. Never edit or copy it."
+
+
+def new_job(name: str) -> Path:
+    """Create config/jobs/NAME.yaml from the template, with a fresh job id and its schedules disabled."""
+    if not JOB_NAME_PATTERN.match(name):
+        raise ValueError("a job name uses letters, digits, '.', '_' and '-' (up to 64 characters)")
+    target = settings.JOBS_DIR / f"{name}.yaml"
+    if target.exists():
+        raise ValueError(f"{target.name} already exists")
+    template = settings.CONFIG_DIR / TEMPLATE
+    if not template.exists():
+        raise ValueError(f"the template {template} is missing")
+    text = template.read_text(encoding="utf-8").replace('"example"', f'"{name}"')
+    text = text.replace(config.NIL_JOB_ID, str(uuid.uuid4()))
+    settings.JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+    return target
+
+
+def adopt_job(path: Path) -> Optional[str]:
+    """Give a job file a job_id if it has none (or only the template's placeholder); returns the new id, or None
+    when it already has one. The rest of the file, comments included, is left as it is."""
+    path = Path(path)
+    text = path.read_text(encoding="utf-8")
+    new_id = str(uuid.uuid4())
+    match = _JOB_ID_LINE.search(text)
+    if match:
+        if match.group(1) not in ("", config.NIL_JOB_ID):
+            return None
+        text = text[:match.start()] + f'job_id: "{new_id}"' + text[match.end():]
+    else:
+        lines = text.splitlines(keepends=True)
+        at = next((i for i, line in enumerate(lines) if line.strip() and not line.lstrip().startswith("#")), len(lines))
+        if at and not lines[at - 1].strip():
+            at -= 1   # keep a comment block that precedes the first setting together with it
+        lines[at:at] = [f"{_ID_COMMENT}\n", f'job_id: "{new_id}"\n', "\n"]
+        text = "".join(lines)
+    path.write_text(text, encoding="utf-8")
+    return new_id
+
+
+def adopt_jobs(files: Optional[list] = None) -> list:
+    """Run adopt_job on the given files (default: every job file); returns [(path, new id)] for those changed."""
+    changed = []
+    for path in [Path(f) for f in files] if files else config.job_files():
+        new_id = adopt_job(path)
+        if new_id:
+            changed.append((path, new_id))
+    return changed
 
 
 def delete_job(job: config.Job) -> None:
@@ -139,12 +197,12 @@ def delete_job(job: config.Job) -> None:
     path = Path(job.path).resolve()
     if path.parent != settings.JOBS_DIR.resolve() or path.suffix not in (".yaml", ".yml"):
         raise ConfigError(f"{job.path} is not a file in {settings.JOBS_DIR}; delete it by hand")
-    if job_lock_info(job.name) is not None:
+    if job_lock_info(job.job_id) is not None:
         raise ConfigError(f"'{job.name}' is running; wait for it to finish")
     path.unlink()
     try:
         with state.transaction() as data:
-            data.get("jobs", {}).pop(job.name, None)
+            data.get("jobs", {}).pop(job.job_id, None)
     except (OSError, portalocker.exceptions.LockException) as exc:
         logger.warning("deleted %s but could not clear its schedule state: %s", path.name, exc)
 

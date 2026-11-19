@@ -21,7 +21,7 @@ def _cmd_config(_args: argparse.Namespace, cfg: Config, client: Client) -> int:
     print(f"{settings.JOBS_DIR}: {len(jobs)} job(s)")
     for job in jobs:
         crons = ", ".join(job.enabled_crons()) or "no schedule enabled"
-        print(f"  {job.name}: {crons}")
+        print(f"  {job.name} ({job.job_id}): {crons}")
     for message in errors:
         print(message, file=sys.stderr)
     return 1 if errors else 0
@@ -112,6 +112,30 @@ def _cmd_jobs(_args: argparse.Namespace, cfg: Config, _client: Client) -> int:
     return 1 if errors else 0
 
 
+def _cmd_job_new(args: argparse.Namespace, _cfg: Config, _client: Client) -> int:
+    try:
+        path = ops.new_job(args.name)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print(f"created {path} with a new job id; edit its paths and schedule, then run `python -m app config`")
+    return 0
+
+
+def _cmd_job_adopt(args: argparse.Namespace, _cfg: Config, _client: Client) -> int:
+    changed = ops.adopt_jobs(args.files or None)
+    for path, job_id in changed:
+        print(f"{path.name}: job_id {job_id}")
+    if not changed:
+        print("every job file already has a job_id")
+    return 0
+
+
+def _cmd_job_usage(_args: argparse.Namespace, _cfg: Config, _client: Client) -> int:
+    print("usage: python -m app job {new,adopt} ...", file=sys.stderr)
+    return 2
+
+
 def _cmd_testmail(_args: argparse.Namespace, cfg: Config, _client: Client) -> int:
     if not mailer.is_configured(cfg.email):
         print("email is not configured: set email.smtp_server and email.to_addrs in config.yaml", file=sys.stderr)
@@ -161,7 +185,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--unit", help="systemd unit name of this install, if it cannot be detected (e.g. jabs-snapshot-agent)")
     add("tick", _cmd_tick, "run the periodic work once (driven by the systemd timer)")
     run = add("run", _cmd_run, "run one backup job now")
-    run.add_argument("job", help="job name (config/jobs/NAME.yaml) or a path to a job file")
+    run.add_argument("job", help="job id, job name, file name (config/jobs/NAME.yaml) or a path to a job file")
     run.add_argument("--init", action="store_true", help="create the repository first if it does not exist")
     run.add_argument("--prune", action="store_true", help="forget and prune old snapshots afterwards")
     run.add_argument("--dry-run", action="store_true", help="pass --dry-run to restic")
@@ -170,7 +194,7 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--deep", action="store_true", help="read all data back (slow)")
     check.add_argument("--subset", metavar="PERCENT_OR_SIZE", help="read only this part of the data, e.g. 5%% or 500M")
     snaps = add("snapshots", _cmd_snapshots, "list snapshots")
-    snaps.add_argument("--job", help="only this job's snapshots")
+    snaps.add_argument("--job", help="only this job's snapshots (job id or name)")
     ls = add("ls", _cmd_ls, "list the files in a snapshot")
     ls.add_argument("snapshot")
     ls.add_argument("path", nargs="?")
@@ -181,6 +205,15 @@ def build_parser() -> argparse.ArgumentParser:
     find = add("find", _cmd_find, "search all snapshots for a file by partial name")
     find.add_argument("query", nargs="?")
     add("jobs", _cmd_jobs, "list jobs with their next and last run")
+    job = add("job", _cmd_job_usage, "create a job file, or give existing ones a job id")
+    job_sub = job.add_subparsers(dest="job_command", metavar="command")
+    job_new = job_sub.add_parser("new", help="create config/jobs/NAME.yaml from the template with a new job id")
+    job_new.set_defaults(func=_cmd_job_new)
+    job_new.add_argument("name", help="letters, digits, . _ and -")
+    job_adopt = job_sub.add_parser(
+        "adopt", help="give job files that have no job_id one (needed once after upgrading from 0.5)")
+    job_adopt.set_defaults(func=_cmd_job_adopt)
+    job_adopt.add_argument("files", nargs="*", help="job files to adopt (default: every file in config/jobs)")
     add("testmail", _cmd_testmail, "send a test message with the email settings")
     report = add("report-storage", _cmd_report_storage, "measure and report storage now")
     report.add_argument("--print", action="store_true", help="only print, do not send to the dashboard")

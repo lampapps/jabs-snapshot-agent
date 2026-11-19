@@ -1,4 +1,5 @@
 import shutil
+import uuid
 from pathlib import Path
 
 import pytest
@@ -38,9 +39,19 @@ def write_config(home: Path, text: str = "repo_path: /tmp/repo\n") -> None:
     (home / "config" / "config.yaml").write_text(text, encoding="utf-8")
 
 
+def jid(name: str) -> str:
+    """The job id the test helper gives the job file called `name`."""
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, name))
+
+
 def write_job(home: Path, name: str = "jim-home", body: str = "") -> Path:
+    """Write config/jobs/NAME.yaml; a body without a job_id gets the one `jid(name)` returns."""
     path = home / "config" / "jobs" / f"{name}.yaml"
-    path.write_text(body or f'job_name: "{name}"\npaths:\n  - /data\ntags:\n  - {name}\n', encoding="utf-8")
+    if not body:
+        body = f'job_name: "{name}"\npaths:\n  - /data\ntags:\n  - {name}\n'
+    if "job_id" not in body:
+        body = f'job_id: "{jid(name)}"\n' + body
+    path.write_text(body, encoding="utf-8")
     return path
 
 

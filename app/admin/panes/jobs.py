@@ -14,7 +14,6 @@ from textual.widgets.data_table import RowDoesNotExist
 from ... import config, ops, settings
 from .. import editing
 from ..app import Pane
-from ..checks import new_job_file
 from ..logs import audit
 
 LIVE_NOTE = ("Backs up the job's paths now, exactly like a scheduled run: reports to the dashboard, emails on failure "
@@ -27,10 +26,10 @@ class JobsPane(Pane):
     TAB_ID = "jobs"
     TAB_TITLE = "1 Jobs"
     ACTIONS = {"jobs.list": "reload", "jobs.run": "do_run", "jobs.edit": "do_edit", "jobs.new": "do_new",
-               "jobs.delete": "do_delete"}
+               "jobs.delete": "do_delete", "jobs.adopt": "do_adopt"}
     BINDINGS = [
         Binding("d", "dry_run", "Dry run"), Binding("b", "backup", "Back up now"), Binding("e", "edit", "Edit"),
-        Binding("n", "new", "New job"), Binding("x", "delete", "Delete job"),
+        Binding("n", "new", "New job"), Binding("x", "delete", "Delete job"), Binding("i", "adopt", "Add missing ids"),
     ]
 
     def __init__(self) -> None:
@@ -46,6 +45,7 @@ class JobsPane(Pane):
             yield Button("Edit job file", id="edit")
             yield Button("New job", id="new")
             yield Button("Delete job", id="delete", variant="error")
+            yield Button("Add missing ids", id="adopt")
 
     def on_mount(self) -> None:
         self.query_one(DataTable).add_columns("Job", "Schedule", "Next run", "Last run", "Now")
@@ -73,7 +73,7 @@ class JobsPane(Pane):
             self._jobs = {}
             note.update(f"config.yaml needs attention (Files tab):\n{exc}")
             return
-        self._jobs = {row["job"].name: row["job"] for row in rows}
+        self._jobs = {row["job"].job_id: row["job"] for row in rows}
         table.clear()
         for row in rows:
             job = row["job"]
@@ -82,7 +82,7 @@ class JobsPane(Pane):
             table.add_row(
                 job.name, ", ".join(job.enabled_crons()) or "none enabled",
                 nxt.strftime("%Y-%m-%d %H:%M") if nxt else "-", ops.format_last(row["last"]),
-                f"RUNNING (pid {running.get('pid', '?')})" if running is not None else "idle", key=job.name)
+                f"RUNNING (pid {running.get('pid', '?')})" if running is not None else "idle", key=job.job_id)
         if keep is not None:
             try:
                 table.move_cursor(row=table.get_row_index(keep))
@@ -103,7 +103,7 @@ class JobsPane(Pane):
         if job is None:
             await self.admin.show("No job selected", "Select a job in the table first.")
             return
-        lock = await asyncio.to_thread(ops.job_lock_info, job.name)
+        lock = await asyncio.to_thread(ops.job_lock_info, job.job_id)
         if lock is not None:
             await self.admin.error(f"'{job.name}' is already running (pid {lock.get('pid', '?')}). Wait for it to finish.")
             return
@@ -138,10 +138,10 @@ class JobsPane(Pane):
     async def do_new(self) -> None:
         fields = [{"key": "name", "label": "Job name", "kind": "text",
                    "help": "Letters, digits, . _ and -. It becomes config/jobs/<name>.yaml, created from the template "
-                           "with its schedule disabled."}]
+                           "with a new job id and its schedule disabled."}]
 
         def submit(values: dict):
-            return new_job_file(values["name"])
+            return ops.new_job(values["name"])
 
         path = await self.admin.form("New job", fields, submit, "Create")
         if path is None:
@@ -153,13 +153,21 @@ class JobsPane(Pane):
             await editing.edit_entry(self.admin, entry)
             await self.reload()
 
+    async def do_adopt(self) -> None:
+        changed = await asyncio.to_thread(ops.adopt_jobs)
+        for path, job_id in changed:
+            audit("job id added", file=path.name, job_id=job_id)
+        await self.reload()
+        await self.admin.show("Add missing ids", "Gave an id to: " + ", ".join(path.name for path, _ in changed)
+                              if changed else "Every job file already has an id.")
+
     async def do_delete(self) -> None:
         name = self.selected()
         job = self._jobs.get(name) if name else None
         if job is None:
             await self.admin.show("No job selected", "Select a job in the table first.")
             return
-        if await asyncio.to_thread(ops.job_lock_info, job.name) is not None:
+        if await asyncio.to_thread(ops.job_lock_info, job.job_id) is not None:
             await self.admin.error(f"'{job.name}' is running; wait for it to finish before deleting it.")
             return
         ok, _ = await self.admin.confirm(
@@ -193,6 +201,9 @@ class JobsPane(Pane):
 
     def action_delete(self) -> None:
         self.admin.spawn(self.do_delete)
+
+    def action_adopt(self) -> None:
+        self.admin.spawn(self.do_adopt)
 
     @on(Button.Pressed)
     def _button(self, event: Button.Pressed) -> None:

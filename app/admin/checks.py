@@ -1,6 +1,5 @@
 """State and validation of the files an administrator edits: config.yaml, .env, the exclude list and the job files."""
 
-import re
 import stat
 from pathlib import Path
 from typing import Optional
@@ -10,8 +9,6 @@ import yaml
 from .. import config, settings
 
 EXAMPLE_NAME = "config.example.yaml"
-TEMPLATE = Path("templates") / "job.yaml"
-JOB_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 def managed_files() -> list:
@@ -76,21 +73,6 @@ def starter_text(entry: dict) -> Optional[str]:
         return None
     example = settings.CONFIG_PATH.parent / EXAMPLE_NAME
     return example.read_text(encoding="utf-8") if example.exists() else None
-
-
-def new_job_file(name: str) -> Path:
-    """Create config/jobs/NAME.yaml from the template (schedules disabled) and return its path."""
-    if not JOB_NAME_PATTERN.match(name):
-        raise ValueError("a job name uses letters, digits, '.', '_' and '-' (up to 64 characters)")
-    target = settings.JOBS_DIR / f"{name}.yaml"
-    if target.exists():
-        raise ValueError(f"{target.name} already exists")
-    template = settings.CONFIG_DIR / TEMPLATE
-    if not template.exists():
-        raise ValueError(f"the template {template} is missing")
-    settings.JOBS_DIR.mkdir(parents=True, exist_ok=True)
-    target.write_text(template.read_text(encoding="utf-8").replace('"example"', f'"{name}"'), encoding="utf-8")
-    return target
 
 
 def snapshot(path: Path) -> Optional[bytes]:

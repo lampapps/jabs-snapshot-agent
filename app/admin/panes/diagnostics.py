@@ -75,7 +75,7 @@ class DiagnosticsPane(Pane):
             await self.admin.show("Dashboard link", f"{client.describe()}\n\nSet JABS_DASHBOARD_URL and JABS_AGENT_KEY in "
                                   ".env (Files tab) and make sure dashboard.enabled is not false in config.yaml.")
             return
-        sent = await asyncio.to_thread(client.send_scheduler_check, 0)
+        sent = await asyncio.to_thread(client.send_heartbeat)
         audit("dashboard heartbeat test", sent=sent)
         await self.admin.show(
             "Dashboard link", f"{client.describe()}\n\n"
@@ -87,10 +87,13 @@ class DiagnosticsPane(Pane):
         locks = {}
         cfg = await asyncio.to_thread(config.load_config)
         rows, _ = await asyncio.to_thread(ops.jobs_overview, cfg)
+        names = {row["job"].job_id: row["job"].name for row in rows}
         for row in rows:
             if row["running"] is not None:
                 locks[row["job"].name] = row["running"]
-        body = json.dumps({"state": data, "running": locks}, indent=1, sort_keys=True, default=str)
+        # The state is keyed by job id; show the names, which are what a person recognises.
+        shown = {**data, "jobs": {names.get(key, key): value for key, value in data.get("jobs", {}).items()}}
+        body = json.dumps({"state": shown, "running": locks}, indent=1, sort_keys=True, default=str)
         await self.admin.show("Schedule state", body or "{}")
 
     async def do_paths(self) -> None:

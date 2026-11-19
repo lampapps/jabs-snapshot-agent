@@ -13,7 +13,7 @@ def at(*args) -> datetime:
 
 
 def job(name="j", *crons):
-    return SimpleNamespace(name=name, enabled_crons=lambda: list(crons))
+    return SimpleNamespace(job_id=name, name=name, enabled_crons=lambda: list(crons))
 
 
 def plan(jobs, data, now):

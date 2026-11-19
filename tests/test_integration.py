@@ -8,7 +8,7 @@ from app import __main__ as cli
 from app import restic, state, storage
 from app.config import Config, find_job, load_config
 
-from .conftest import requires_restic, write_config, write_job
+from .conftest import requires_restic, write_config, write_job, jid
 
 pytestmark = requires_restic
 
@@ -34,7 +34,7 @@ def repo(home, tmp_path, monkeypatch):
 
 def test_run_creates_backs_up_prunes_and_records(repo, capsys):
     assert cli.main(["run", "docs", "--init"]) == 0
-    first = state.read()["jobs"]["docs"]["last_run"]
+    first = state.read()["jobs"][jid("docs")]["last_run"]
     assert first["success"] and len(first["snapshot_id"]) == 64 and first["files"] >= 2
 
     (repo.source / "new.txt").write_text("changed\n")
@@ -47,7 +47,7 @@ def test_run_creates_backs_up_prunes_and_records(repo, capsys):
 
 def test_a_missing_repository_needs_init(repo, capsys):
     assert cli.main(["run", "docs"]) == 1
-    assert state.read()["jobs"]["docs"]["last_run"]["success"] is False
+    assert state.read()["jobs"][jid("docs")]["last_run"]["success"] is False
 
 
 def test_storage_samples_come_from_real_numbers(repo):

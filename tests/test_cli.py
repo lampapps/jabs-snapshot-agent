@@ -11,7 +11,7 @@ from app import __main__ as cli
 from app import mailer, restic, runner, state
 from app.config import ConfigError
 
-from .conftest import REPO_ROOT, write_config, write_job
+from .conftest import REPO_ROOT, write_config, write_job, jid
 
 JOB = 'job_name: "{name}"\npaths: [/data]\nschedules:\n  - cron: "{cron}"\n    enabled: true\n'
 
@@ -32,7 +32,8 @@ class TestConfigAndJobs:
         write_job(home, "b", "paths: [/d]\n")
         assert main("config") == 0
         out = capsys.readouterr().out
-        assert "repo: /mnt/repo" in out and "standalone" in out and "a: 0 3 * * *" in out and "b: no schedule enabled" in out
+        assert "repo: /mnt/repo" in out and "standalone" in out and f"a ({jid('a')}): 0 3 * * *" in out
+        assert f"b ({jid('b')}): no schedule enabled" in out
 
     def test_config_reports_the_dashboard_when_configured(self, home, capsys, monkeypatch):
         write_config(home)
@@ -55,7 +56,7 @@ class TestConfigAndJobs:
         write_config(home)
         write_job(home, "a", JOB.format(name="a", cron="0 3 * * *"))
         write_job(home, "b", "paths: [/d]\n")
-        state.record_run("a", {"success": False, "finished_at": 1_800_000_000})
+        state.record_run(jid("a"), {"success": False, "finished_at": 1_800_000_000})
         assert main("jobs") == 0
         lines = dict(line.split("\t", 1) for line in capsys.readouterr().out.strip().splitlines())
         assert "next 20" in lines["a"] and "last FAILED 2027-01-15" in lines["a"]
@@ -69,7 +70,7 @@ class TestTick:
         with caplog.at_level("INFO"):
             assert main("tick") == 0
         assert "tick complete" in caplog.text
-        assert state.read()["jobs"]["a"]["served"]  # baseline recorded
+        assert state.read()["jobs"][jid("a")]["served"]  # baseline recorded
 
 
 class TestRun:
@@ -91,6 +92,48 @@ class TestRun:
         write_job(home, "a", "paths: [/d]\n")
         monkeypatch.setattr(runner, "run_job", lambda *a, **k: False)
         assert main("run", "a") == 1
+
+    def test_a_job_can_be_run_by_its_id(self, home, monkeypatch):
+        write_config(home)
+        write_job(home, "a", "paths: [/d]\n")
+        seen = []
+        monkeypatch.setattr(runner, "run_job", lambda job, cfg, client, **kw: seen.append(job.name) or True)
+        assert main("run", jid("a")) == 0 and seen == ["a"]
+
+
+class TestJobCommands:
+    def test_job_new_creates_a_file_with_its_own_id(self, home, capsys):
+        write_config(home)
+        (home / "config" / "templates").mkdir()
+        (home / "config" / "templates" / "job.yaml").write_text(
+            'job_id: "00000000-0000-4000-8000-000000000000"\njob_name: "example"\npaths: [/p]\n')
+        assert main("job", "new", "photos") == 0
+        assert "photos.yaml" in capsys.readouterr().out
+        assert main("job", "new", "photos") == 1 and "already exists" in capsys.readouterr().err
+        assert main("job", "new", "bad name") == 1
+        assert main("config") == 0
+
+    def test_job_adopt_gives_ids_and_config_then_passes(self, home, capsys):
+        write_config(home)
+        (home / "config" / "jobs" / "old.yaml").write_text("paths: [/d]\n")
+        assert main("config") == 1 and "job adopt" in capsys.readouterr().err
+        assert main("job", "adopt") == 0
+        assert "old.yaml: job_id" in capsys.readouterr().out
+        assert main("config") == 0
+        assert main("job", "adopt") == 0 and "already has a job_id" in capsys.readouterr().out
+
+    def test_job_adopt_can_name_files(self, home, capsys):
+        write_config(home)
+        path = home / "config" / "jobs" / "one.yaml"
+        other = home / "config" / "jobs" / "two.yaml"
+        path.write_text("paths: [/d]\n")
+        other.write_text("paths: [/d]\n")
+        assert main("job", "adopt", str(path)) == 0
+        assert "job_id" in path.read_text() and "job_id" not in other.read_text()
+
+    def test_job_without_a_subcommand_prints_usage(self, home, capsys):
+        write_config(home)
+        assert main("job") == 2 and "usage" in capsys.readouterr().err
 
 
 class TestRepositoryCommands:
@@ -168,7 +211,7 @@ class TestMisc:
         write_config(home)
         (home / "data" / "locks").mkdir(parents=True)
         (home / "data" / "locks" / "a.lock").write_text("{}")
-        state.record_run("a", {"success": True})
+        state.record_run(jid("a"), {"success": True})
         assert main("reset") == 2 and (home / "data" / "state.json").exists()
         assert main("reset", "--yes") == 0
         assert not (home / "data" / "state.json").exists() and not (home / "data" / "locks").exists()

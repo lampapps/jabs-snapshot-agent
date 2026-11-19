@@ -30,7 +30,7 @@ def due_jobs(jobs: list, data: dict, now: datetime) -> list:
     """Jobs with an unserved slot; marks those slots served in `data` (call inside a state transaction)."""
     due = []
     for job in jobs:
-        served = state.job_entry(data, job.name).setdefault("served", {})
+        served = state.job_entry(data, job.job_id).setdefault("served", {})
         job_due = False
         for cron in job.enabled_crons():
             slot = latest_slot(cron, now).timestamp()

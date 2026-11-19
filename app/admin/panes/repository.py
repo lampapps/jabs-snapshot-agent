@@ -30,7 +30,8 @@ class RepositoryPane(Pane):
 
     def __init__(self) -> None:
         super().__init__()
-        self._job: Optional[str] = None
+        self._job: Optional[str] = None       # a job's id
+        self._job_name: Optional[str] = None
 
     def compose(self) -> ComposeResult:
         yield Static("", id="repo-note", markup=False, classes="note")
@@ -67,7 +68,7 @@ class RepositoryPane(Pane):
         for snap in sorted(snapshots, key=lambda s: s.get("time", ""), reverse=True):
             short, stamp, host, tags, paths = ops.snapshot_fields(snap)
             table.add_row(short, stamp, host, tags, paths, key=short)
-        scope = f" for job '{self._job}'" if self._job else ""
+        scope = f" for job '{self._job_name}'" if self._job else ""
         note.update(f"{len(snapshots)} snapshot(s){scope} in {cfg.repo_path}" if snapshots
                     else f"No snapshots{scope} in {cfg.repo_path}. If the repository does not exist yet, press i.")
 
@@ -155,11 +156,12 @@ class RepositoryPane(Pane):
     async def do_job_filter(self) -> None:
         cfg = await asyncio.to_thread(config.load_config)
         jobs, _ = await asyncio.to_thread(config.load_jobs, cfg)
-        options = [("All jobs", "")] + [(job.name, job.name) for job in jobs]
+        options = [("All jobs", "")] + [(job.name, job.job_id) for job in jobs]
         choice = await self.admin.pick("Show snapshots of...", options)
         if choice is None:
             return
         self._job = choice or None
+        self._job_name = next((job.name for job in jobs if job.job_id == choice), None)
         await self.reload()
 
     # ---------------------------------------------------------------- bindings and buttons
